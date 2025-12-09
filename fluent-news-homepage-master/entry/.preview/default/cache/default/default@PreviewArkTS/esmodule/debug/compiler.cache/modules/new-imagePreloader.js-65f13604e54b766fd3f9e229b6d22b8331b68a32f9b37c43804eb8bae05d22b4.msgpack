@@ -1,0 +1,1047 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚ,Ximport { isSafari } from './common';
+import createNS from './helpers/svg_elements';
+import dataManager from './DataManager';
+import image from '@ohos.multimedia.image';
+import fs from '@ohos.file.fs';
+import {LogUtil} from './LogUtil'
+
+//ç±»å‹å®šä¹‰å‚è€ƒ https://lottiefiles.github.io/lottie-docs/assets/
+const SOURCE_BASE64 = /data:image\/([a-zA-Z0-9+-]+\/?);base64/;
+const TYPE_IMAGE_SOURCE_RAWFILE = 0
+const TYPE_IMAGE_SOURCE_BASE64 = 1
+
+const ImagePreloader = (function () {
+  var proxyImage = (function () {
+
+    // ä½¿ç”¨ç©ºå¯¹è±¡æ›¿ä»£ä¸æ”¯æŒåŠ¨æ€åˆ›å»ºçš„Canvasç»„ä»¶
+    return {  };
+  }());
+
+  function imageLoaded() {
+    this.loadedAssets += 1;
+    if (this.loadedAssets === this.totalImages && this.loadedFootagesCount === this.totalFootages) {
+      if (this.imagesLoadedCb) {
+        this.imagesLoadedCb(null);
+      }
+    }
+  }
+  function footageLoaded() {
+    this.loadedFootagesCount += 1;
+    if (this.loadedAssets === this.totalImages && this.loadedFootagesCount === this.totalFootages) {
+      if (this.imagesLoadedCb) {
+        this.imagesLoadedCb(null);
+      }
+    }
+  }
+
+  function getAssetsPath(assetData, assetsPath, originalPath) {
+    var path = '';
+    if (assetData.e) {
+      path = assetData.p;
+    } else if (assetsPath) {
+      var imagePath = assetData.p;
+      if (imagePath.indexOf('images/') !== -1) {
+        imagePath = imagePath.split('/')[1];
+      }
+      path = assetsPath + imagePath;
+    } else {
+      path = originalPath;
+      path += assetData.u ? assetData.u : '';
+      path += assetData.p;
+    }
+    return path;
+  }
+
+  function testImageLoaded(img) {
+    var _count = 0;
+    var intervalId = setInterval(function () {
+      var box = img.getBBox();
+      if (box.width || _count > 500) {
+        this._imageLoaded();
+        clearInterval(intervalId);
+      }
+      _count += 1;
+    }.bind(this), 50);
+  }
+
+  function generatePixelMapAndRefreshUI2(data, ob, callback) {
+    let image_source = image.createImageSource(data)
+    //piexlmapæ”¹æˆä¸å¯ç¼–è¾‘çŠ¶æ€ï¼Œä¼˜åŒ–å›¾å½¢å›¾åƒç«¯è¯»å–é€Ÿåº¦
+    let opts = {
+        editable: false,
+        desiredPixelFormat: image.PixelMapFormat.RGBA_8888
+    };
+    //åˆ›å»ºpixel_map
+    image_source?.createPixelMap(opts, (err, pixel_map) => {
+      if (!err) {
+        ob.img.pixel_map = pixel_map;
+        if (ob.assetData && ob.assetData.w && ob.assetData.h) {
+          ob.img.width = ob.assetData.w;
+          ob.img.height = ob.assetData.h;
+          callback();
+        } else {
+          //è·å–è§£æå‡ºæ¥çš„pixel_mapçš„å®½ã€é«˜
+          pixel_map.getImageInfo().then((image_info) => {
+            ob.img.width = image_info.size.width;
+            ob.img.height = image_info.size.height;
+            callback();
+          });
+        }
+      } else {
+        callback();
+      }
+    });
+  }
+
+  function createImageData(assetData) {
+    var path = getAssetsPath(assetData, this.assetsPath, this.path);
+    var img = createNS('image');
+    if (isSafari) {
+      this.testImageLoaded(img);
+    } else {
+      img.addEventListener('load', this._imageLoaded, false);
+    }
+    img.addEventListener('error', function () {
+      ob.img = proxyImage;
+      this._imageLoaded();
+    }.bind(this), false);
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', path);
+    if (this._elementHelper.append) {
+      this._elementHelper.append(img);
+    } else {
+      this._elementHelper.appendChild(img);
+    }
+    var ob = {
+      img: img,
+      assetData: assetData,
+    };
+    return ob;
+  }
+
+  function createImgData(assetData) {
+    var path = getAssetsPath(assetData, this.assetsPath, this.path);
+    var context = this.context;
+    if (context == null) {
+      context = getContext();
+    }
+    //å› OpenHarmonyæ— æ³•é€šè¿‡createTagåˆ›å»ºhtmlä¸­çš„imgæ ‡ç­¾ï¼Œæ‰€ä»¥è¿™é‡Œæ„é€ ä¸€ä¸ªimgå¯¹è±¡ï¼ŒåŒè¿›æ·»åŠ å…¶ä½¿ç”¨åˆ°çš„addEventListeneræ–¹æ³•
+    var img = {
+      addEventListener: function (type, callback, flag) {
+        if (type === "load") {
+            if (this._imageAssetDelegate) {
+                this._imageAssetDelegate(path, (err, pixel_map) => {
+                  if (pixel_map == null) {
+                    //assetData.eå€¼æ˜¯ä¸å”¯ä¸€çš„å‚æ•°ï¼Œæ‰€ä»¥ç”±assetData.på€¼æ¥åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯base64å›¾ç‰‡èµ„æºï¼Œè¿˜æ˜¯å¤–éƒ¨å›¾ç‰‡èµ„æº
+                    if (SOURCE_BASE64.test(assetData.p)) { //æ­£åˆ™è¡¨è¾¾å¼åˆ¤æ–­æ˜¯å¦å«æœ‰data:image/;base64å­—æ®µ
+                      readBase64(assetData, ob, callback); //base64å›¾ç‰‡
+                    } else { //rawfileèµ„æºå›¾ç‰‡
+                      readRawFile(context, assetData, ob, callback);
+                    }
+                  } else {
+                    ob.img.pixel_map = pixel_map;
+                    if (ob.assetData && ob.assetData.w && ob.assetData.h) {
+                      ob.img.width = ob.assetData.w;
+                      ob.img.height = ob.assetData.h;
+                      callback();
+                    } else {
+                      //è·å–è§£æå‡ºæ¥çš„pixel_mapçš„å®½ã€é«˜
+                      pixel_map.getImageInfo().then((image_info) => {
+                        ob.img.width = image_info.size.width;
+                        ob.img.height = image_info.size.height;
+                        callback();
+                      });
+                    }
+                  }
+                });
+                return;
+            }
+          //assetData.eå€¼æ˜¯ä¸å”¯ä¸€çš„å‚æ•°ï¼Œæ‰€ä»¥ç”±assetData.på€¼æ¥åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯base64å›¾ç‰‡èµ„æºï¼Œè¿˜æ˜¯å¤–éƒ¨å›¾ç‰‡èµ„æº
+          if (SOURCE_BASE64.test(assetData.p)) { //æ­£åˆ™è¡¨è¾¾å¼åˆ¤æ–­æ˜¯å¦å«æœ‰data:image/;base64å­—æ®µ
+            readBase64(assetData, ob, callback); //base64å›¾ç‰‡
+          } else { //rawfileèµ„æºå›¾ç‰‡
+            readRawFile(context, assetData, ob, callback);
+          }
+        }
+      }.bind(this)
+    };
+    var ob = {
+      img: img,
+      assetData: assetData,
+    };
+    img.crossOrigin = 'anonymous';
+    img.addEventListener('load', this._imageLoaded, false);
+    img.addEventListener('error', function () {
+      ob.img = proxyImage;
+      this._imageLoaded();
+    }.bind(this), false);
+    img.src = path;
+    return ob;
+  }
+
+  function readBase64(assetData, ob, callback) {
+    //generatePixelMapAndRefreshUIçš„å…¥å‚obå¯èƒ½ä¸ºundefinedï¼Œæ‰€ä»¥è¿™é‡Œéœ€è¦æ¯éš”ä¸€æ®µæ—¶é—´æ£€æµ‹ä¸€ä¸‹obæ˜¯å¦å®ä¾‹åŒ–å¥½äº†
+    let task_id = setInterval(() => {
+      if (!ob) {
+        return
+      }
+      generatePixelMapAndRefreshUI2(assetData.p, ob, callback)
+      //å–æ¶ˆå¾ªç¯æ£€æµ‹
+      clearInterval(task_id)
+    }, 10)
+  }
+
+  function readRawFile(context, assetData, ob, callback) {
+    //æ‹¼æ¥rawfile url
+    let res = assetData.u + assetData.p; //->common/image/lottie/icon.png
+    try {
+      let filePath = context.filesDir + '/' + res;
+      let isExist = fs.accessSync(filePath); //åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯å¦å­˜åœ¨
+      if (isExist) {
+        let file = fs.openSync(filePath, fs.OpenMode.READ_ONLY);
+        let stat = fs.statSync(filePath);
+        let arrayBuffer = new ArrayBuffer(stat.size);
+        fs.read(file.fd, arrayBuffer, (err, readLen) => {
+          if (!!!err) {
+            generatePixelMapAndRefreshUI2(arrayBuffer, ob, callback);
+          } else {
+            //åŠ è½½ä¾èµ–å›¾ç‰‡å¼‚å¸¸æ—¶ï¼Œé»˜è®¤åŠ¨ç”»åŠ è½½æ­£å¸¸
+            callback();
+          }
+          fs.close(file)
+        })
+      } else {
+        //è·å–rawfileçš„å­—èŠ‚æ•°ç»„æ•°æ®
+        context.resourceManager.getRawFileContent(res, (err, raw_file_content) => {
+          if (!!!err) {
+            generatePixelMapAndRefreshUI2(raw_file_content.buffer, ob, callback);
+          } else {
+            //åŠ è½½ä¾èµ–å›¾ç‰‡å¼‚å¸¸æ—¶ï¼Œé»˜è®¤åŠ¨ç”»åŠ è½½æ­£å¸¸
+            callback();
+          }
+        })
+      }
+    } catch (err) {
+      LogUtil.error('Method readRawFile execute error: ' + JSON.stringify(err));
+    }
+  }
+
+  function createFootageData(data) {
+    var ob = {
+      assetData: data,
+    };
+    var path = getAssetsPath(data, this.assetsPath, this.path);
+    dataManager.loadData(path, function (footageData) {
+      ob.img = footageData;
+      this._footageLoaded();
+    }.bind(this), function () {
+      ob.img = {};
+      this._footageLoaded();
+    }.bind(this));
+    return ob;
+  }
+
+  function loadAssets(assets, cb) {
+    this.imagesLoadedCb = cb;
+    var i;
+    var len = assets.length;
+    for (i = 0; i < len; i += 1) {
+      if (!assets[i].layers) {
+        if (this.imagePath && this.imagePath != '') {
+          assets[i].u = this.imagePath;
+        }
+        if (!assets[i].t || assets[i].t === 'seq') {
+          this.totalImages += 1;
+          this.images.push(this._createImageData(assets[i]));
+        } else if (assets[i].t === 3) {
+          this.totalFootages += 1;
+          this.images.push(this.createFootageData(assets[i]));
+        }
+      }
+    }
+  }
+
+  function setPath(path) {
+    this.path = path || '';
+  }
+
+  function setAssetsPath(path) {
+    this.assetsPath = path || '';
+  }
+
+  function getAsset(assetData) {
+    var i = 0;
+    var len = this.images.length;
+    while (i < len) {
+      if (this.images[i].assetData === assetData) {
+        return this.images[i].img;
+      }
+      i += 1;
+    }
+    return null;
+  }
+
+  function destroy() {
+    this.imagesLoadedCb = null;
+    this.images.length = 0;
+  }
+
+  function loadedImages() {
+    return this.totalImages === this.loadedAssets;
+  }
+
+  function loadedFootages() {
+    return this.totalFootages === this.loadedFootagesCount;
+  }
+
+  function setImageAssetDelegate(imageAssetDelegate) {
+    this._imageAssetDelegate = imageAssetDelegate;
+  }
+
+  function setCacheType(type, elementHelper, context, imagePath) {
+    this.context = context;
+    this.imagePath = imagePath;
+    if (type === 'svg') {
+      this._elementHelper = elementHelper;
+      this._createImageData = this.createImageData.bind(this);
+    } else {
+      this._createImageData = this.createImgData.bind(this);
+    }
+  }
+
+  function ImagePreloaderFactory() {
+    this._imageLoaded = imageLoaded.bind(this);
+    this._footageLoaded = footageLoaded.bind(this);
+    this._imageAssetDelegate = null;
+    this.testImageLoaded = testImageLoaded.bind(this);
+    this.createFootageData = createFootageData.bind(this);
+    this.assetsPath = '';
+    this.path = '';
+    this.totalImages = 0;
+    this.totalFootages = 0;
+    this.loadedAssets = 0;
+    this.loadedFootagesCount = 0;
+    this.imagesLoadedCb = null;
+    this.images = [];
+    this.context = null;
+    this.imagePath = '';
+  }
+
+  ImagePreloaderFactory.prototype = {
+    loadAssets: loadAssets,
+    setAssetsPath: setAssetsPath,
+    setPath: setPath,
+    loadedImages: loadedImages,
+    loadedFootages: loadedFootages,
+    destroy: destroy,
+    getAsset: getAsset,
+    createImgData: createImgData,
+    createImageData: createImageData,
+    imageLoaded: imageLoaded,
+    footageLoaded: footageLoaded,
+    setCacheType: setCacheType,
+    setImageAssetDelegate: setImageAssetDelegate,
+  };
+
+  return ImagePreloaderFactory;
+}());
+
+export default ImagePreloader;
+Â–Ù‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\svg_elements.jsÙ–D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataManager.jsÙ[ hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.multimedia.image.d.tsÙR hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.file.fs.d.tsÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\imagePreloader.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚ,Ximport { isSafari } from './common';
+import createNS from './helpers/svg_elements';
+import dataManager from './DataManager';
+import image from '@ohos.multimedia.image';
+import fs from '@ohos.file.fs';
+import {LogUtil} from './LogUtil'
+
+//ç±»å‹å®šä¹‰å‚è€ƒ https://lottiefiles.github.io/lottie-docs/assets/
+const SOURCE_BASE64 = /data:image\/([a-zA-Z0-9+-]+\/?);base64/;
+const TYPE_IMAGE_SOURCE_RAWFILE = 0
+const TYPE_IMAGE_SOURCE_BASE64 = 1
+
+const ImagePreloader = (function () {
+  var proxyImage = (function () {
+
+    // ä½¿ç”¨ç©ºå¯¹è±¡æ›¿ä»£ä¸æ”¯æŒåŠ¨æ€åˆ›å»ºçš„Canvasç»„ä»¶
+    return {  };
+  }());
+
+  function imageLoaded() {
+    this.loadedAssets += 1;
+    if (this.loadedAssets === this.totalImages && this.loadedFootagesCount === this.totalFootages) {
+      if (this.imagesLoadedCb) {
+        this.imagesLoadedCb(null);
+      }
+    }
+  }
+  function footageLoaded() {
+    this.loadedFootagesCount += 1;
+    if (this.loadedAssets === this.totalImages && this.loadedFootagesCount === this.totalFootages) {
+      if (this.imagesLoadedCb) {
+        this.imagesLoadedCb(null);
+      }
+    }
+  }
+
+  function getAssetsPath(assetData, assetsPath, originalPath) {
+    var path = '';
+    if (assetData.e) {
+      path = assetData.p;
+    } else if (assetsPath) {
+      var imagePath = assetData.p;
+      if (imagePath.indexOf('images/') !== -1) {
+        imagePath = imagePath.split('/')[1];
+      }
+      path = assetsPath + imagePath;
+    } else {
+      path = originalPath;
+      path += assetData.u ? assetData.u : '';
+      path += assetData.p;
+    }
+    return path;
+  }
+
+  function testImageLoaded(img) {
+    var _count = 0;
+    var intervalId = setInterval(function () {
+      var box = img.getBBox();
+      if (box.width || _count > 500) {
+        this._imageLoaded();
+        clearInterval(intervalId);
+      }
+      _count += 1;
+    }.bind(this), 50);
+  }
+
+  function generatePixelMapAndRefreshUI2(data, ob, callback) {
+    let image_source = image.createImageSource(data)
+    //piexlmapæ”¹æˆä¸å¯ç¼–è¾‘çŠ¶æ€ï¼Œä¼˜åŒ–å›¾å½¢å›¾åƒç«¯è¯»å–é€Ÿåº¦
+    let opts = {
+        editable: false,
+        desiredPixelFormat: image.PixelMapFormat.RGBA_8888
+    };
+    //åˆ›å»ºpixel_map
+    image_source?.createPixelMap(opts, (err, pixel_map) => {
+      if (!err) {
+        ob.img.pixel_map = pixel_map;
+        if (ob.assetData && ob.assetData.w && ob.assetData.h) {
+          ob.img.width = ob.assetData.w;
+          ob.img.height = ob.assetData.h;
+          callback();
+        } else {
+          //è·å–è§£æå‡ºæ¥çš„pixel_mapçš„å®½ã€é«˜
+          pixel_map.getImageInfo().then((image_info) => {
+            ob.img.width = image_info.size.width;
+            ob.img.height = image_info.size.height;
+            callback();
+          });
+        }
+      } else {
+        callback();
+      }
+    });
+  }
+
+  function createImageData(assetData) {
+    var path = getAssetsPath(assetData, this.assetsPath, this.path);
+    var img = createNS('image');
+    if (isSafari) {
+      this.testImageLoaded(img);
+    } else {
+      img.addEventListener('load', this._imageLoaded, false);
+    }
+    img.addEventListener('error', function () {
+      ob.img = proxyImage;
+      this._imageLoaded();
+    }.bind(this), false);
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', path);
+    if (this._elementHelper.append) {
+      this._elementHelper.append(img);
+    } else {
+      this._elementHelper.appendChild(img);
+    }
+    var ob = {
+      img: img,
+      assetData: assetData,
+    };
+    return ob;
+  }
+
+  function createImgData(assetData) {
+    var path = getAssetsPath(assetData, this.assetsPath, this.path);
+    var context = this.context;
+    if (context == null) {
+      context = getContext();
+    }
+    //å› OpenHarmonyæ— æ³•é€šè¿‡createTagåˆ›å»ºhtmlä¸­çš„imgæ ‡ç­¾ï¼Œæ‰€ä»¥è¿™é‡Œæ„é€ ä¸€ä¸ªimgå¯¹è±¡ï¼ŒåŒè¿›æ·»åŠ å…¶ä½¿ç”¨åˆ°çš„addEventListeneræ–¹æ³•
+    var img = {
+      addEventListener: function (type, callback, flag) {
+        if (type === "load") {
+            if (this._imageAssetDelegate) {
+                this._imageAssetDelegate(path, (err, pixel_map) => {
+                  if (pixel_map == null) {
+                    //assetData.eå€¼æ˜¯ä¸å”¯ä¸€çš„å‚æ•°ï¼Œæ‰€ä»¥ç”±assetData.på€¼æ¥åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯base64å›¾ç‰‡èµ„æºï¼Œè¿˜æ˜¯å¤–éƒ¨å›¾ç‰‡èµ„æº
+                    if (SOURCE_BASE64.test(assetData.p)) { //æ­£åˆ™è¡¨è¾¾å¼åˆ¤æ–­æ˜¯å¦å«æœ‰data:image/;base64å­—æ®µ
+                      readBase64(assetData, ob, callback); //base64å›¾ç‰‡
+                    } else { //rawfileèµ„æºå›¾ç‰‡
+                      readRawFile(context, assetData, ob, callback);
+                    }
+                  } else {
+                    ob.img.pixel_map = pixel_map;
+                    if (ob.assetData && ob.assetData.w && ob.assetData.h) {
+                      ob.img.width = ob.assetData.w;
+                      ob.img.height = ob.assetData.h;
+                      callback();
+                    } else {
+                      //è·å–è§£æå‡ºæ¥çš„pixel_mapçš„å®½ã€é«˜
+                      pixel_map.getImageInfo().then((image_info) => {
+                        ob.img.width = image_info.size.width;
+                        ob.img.height = image_info.size.height;
+                        callback();
+                      });
+                    }
+                  }
+                });
+                return;
+            }
+          //assetData.eå€¼æ˜¯ä¸å”¯ä¸€çš„å‚æ•°ï¼Œæ‰€ä»¥ç”±assetData.på€¼æ¥åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯base64å›¾ç‰‡èµ„æºï¼Œè¿˜æ˜¯å¤–éƒ¨å›¾ç‰‡èµ„æº
+          if (SOURCE_BASE64.test(assetData.p)) { //æ­£åˆ™è¡¨è¾¾å¼åˆ¤æ–­æ˜¯å¦å«æœ‰data:image/;base64å­—æ®µ
+            readBase64(assetData, ob, callback); //base64å›¾ç‰‡
+          } else { //rawfileèµ„æºå›¾ç‰‡
+            readRawFile(context, assetData, ob, callback);
+          }
+        }
+      }.bind(this)
+    };
+    var ob = {
+      img: img,
+      assetData: assetData,
+    };
+    img.crossOrigin = 'anonymous';
+    img.addEventListener('load', this._imageLoaded, false);
+    img.addEventListener('error', function () {
+      ob.img = proxyImage;
+      this._imageLoaded();
+    }.bind(this), false);
+    img.src = path;
+    return ob;
+  }
+
+  function readBase64(assetData, ob, callback) {
+    //generatePixelMapAndRefreshUIçš„å…¥å‚obå¯èƒ½ä¸ºundefinedï¼Œæ‰€ä»¥è¿™é‡Œéœ€è¦æ¯éš”ä¸€æ®µæ—¶é—´æ£€æµ‹ä¸€ä¸‹obæ˜¯å¦å®ä¾‹åŒ–å¥½äº†
+    let task_id = setInterval(() => {
+      if (!ob) {
+        return
+      }
+      generatePixelMapAndRefreshUI2(assetData.p, ob, callback)
+      //å–æ¶ˆå¾ªç¯æ£€æµ‹
+      clearInterval(task_id)
+    }, 10)
+  }
+
+  function readRawFile(context, assetData, ob, callback) {
+    //æ‹¼æ¥rawfile url
+    let res = assetData.u + assetData.p; //->common/image/lottie/icon.png
+    try {
+      let filePath = context.filesDir + '/' + res;
+      let isExist = fs.accessSync(filePath); //åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯å¦å­˜åœ¨
+      if (isExist) {
+        let file = fs.openSync(filePath, fs.OpenMode.READ_ONLY);
+        let stat = fs.statSync(filePath);
+        let arrayBuffer = new ArrayBuffer(stat.size);
+        fs.read(file.fd, arrayBuffer, (err, readLen) => {
+          if (!!!err) {
+            generatePixelMapAndRefreshUI2(arrayBuffer, ob, callback);
+          } else {
+            //åŠ è½½ä¾èµ–å›¾ç‰‡å¼‚å¸¸æ—¶ï¼Œé»˜è®¤åŠ¨ç”»åŠ è½½æ­£å¸¸
+            callback();
+          }
+          fs.close(file)
+        })
+      } else {
+        //è·å–rawfileçš„å­—èŠ‚æ•°ç»„æ•°æ®
+        context.resourceManager.getRawFileContent(res, (err, raw_file_content) => {
+          if (!!!err) {
+            generatePixelMapAndRefreshUI2(raw_file_content.buffer, ob, callback);
+          } else {
+            //åŠ è½½ä¾èµ–å›¾ç‰‡å¼‚å¸¸æ—¶ï¼Œé»˜è®¤åŠ¨ç”»åŠ è½½æ­£å¸¸
+            callback();
+          }
+        })
+      }
+    } catch (err) {
+      LogUtil.error('Method readRawFile execute error: ' + JSON.stringify(err));
+    }
+  }
+
+  function createFootageData(data) {
+    var ob = {
+      assetData: data,
+    };
+    var path = getAssetsPath(data, this.assetsPath, this.path);
+    dataManager.loadData(path, function (footageData) {
+      ob.img = footageData;
+      this._footageLoaded();
+    }.bind(this), function () {
+      ob.img = {};
+      this._footageLoaded();
+    }.bind(this));
+    return ob;
+  }
+
+  function loadAssets(assets, cb) {
+    this.imagesLoadedCb = cb;
+    var i;
+    var len = assets.length;
+    for (i = 0; i < len; i += 1) {
+      if (!assets[i].layers) {
+        if (this.imagePath && this.imagePath != '') {
+          assets[i].u = this.imagePath;
+        }
+        if (!assets[i].t || assets[i].t === 'seq') {
+          this.totalImages += 1;
+          this.images.push(this._createImageData(assets[i]));
+        } else if (assets[i].t === 3) {
+          this.totalFootages += 1;
+          this.images.push(this.createFootageData(assets[i]));
+        }
+      }
+    }
+  }
+
+  function setPath(path) {
+    this.path = path || '';
+  }
+
+  function setAssetsPath(path) {
+    this.assetsPath = path || '';
+  }
+
+  function getAsset(assetData) {
+    var i = 0;
+    var len = this.images.length;
+    while (i < len) {
+      if (this.images[i].assetData === assetData) {
+        return this.images[i].img;
+      }
+      i += 1;
+    }
+    return null;
+  }
+
+  function destroy() {
+    this.imagesLoadedCb = null;
+    this.images.length = 0;
+  }
+
+  function loadedImages() {
+    return this.totalImages === this.loadedAssets;
+  }
+
+  function loadedFootages() {
+    return this.totalFootages === this.loadedFootagesCount;
+  }
+
+  function setImageAssetDelegate(imageAssetDelegate) {
+    this._imageAssetDelegate = imageAssetDelegate;
+  }
+
+  function setCacheType(type, elementHelper, context, imagePath) {
+    this.context = context;
+    this.imagePath = imagePath;
+    if (type === 'svg') {
+      this._elementHelper = elementHelper;
+      this._createImageData = this.createImageData.bind(this);
+    } else {
+      this._createImageData = this.createImgData.bind(this);
+    }
+  }
+
+  function ImagePreloaderFactory() {
+    this._imageLoaded = imageLoaded.bind(this);
+    this._footageLoaded = footageLoaded.bind(this);
+    this._imageAssetDelegate = null;
+    this.testImageLoaded = testImageLoaded.bind(this);
+    this.createFootageData = createFootageData.bind(this);
+    this.assetsPath = '';
+    this.path = '';
+    this.totalImages = 0;
+    this.totalFootages = 0;
+    this.loadedAssets = 0;
+    this.loadedFootagesCount = 0;
+    this.imagesLoadedCb = null;
+    this.images = [];
+    this.context = null;
+    this.imagePath = '';
+  }
+
+  ImagePreloaderFactory.prototype = {
+    loadAssets: loadAssets,
+    setAssetsPath: setAssetsPath,
+    setPath: setPath,
+    loadedImages: loadedImages,
+    loadedFootages: loadedFootages,
+    destroy: destroy,
+    getAsset: getAsset,
+    createImgData: createImgData,
+    createImageData: createImageData,
+    imageLoaded: imageLoaded,
+    footageLoaded: footageLoaded,
+    setCacheType: setCacheType,
+    setImageAssetDelegate: setImageAssetDelegate,
+  };
+
+  return ImagePreloaderFactory;
+}());
+
+export default ImagePreloader;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ]‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘Ù™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\imagePreloader.js‘Ú,Ximport { isSafari } from './common';
+import createNS from './helpers/svg_elements';
+import dataManager from './DataManager';
+import image from '@ohos.multimedia.image';
+import fs from '@ohos.file.fs';
+import {LogUtil} from './LogUtil'
+
+//ç±»å‹å®šä¹‰å‚è€ƒ https://lottiefiles.github.io/lottie-docs/assets/
+const SOURCE_BASE64 = /data:image\/([a-zA-Z0-9+-]+\/?);base64/;
+const TYPE_IMAGE_SOURCE_RAWFILE = 0
+const TYPE_IMAGE_SOURCE_BASE64 = 1
+
+const ImagePreloader = (function () {
+  var proxyImage = (function () {
+
+    // ä½¿ç”¨ç©ºå¯¹è±¡æ›¿ä»£ä¸æ”¯æŒåŠ¨æ€åˆ›å»ºçš„Canvasç»„ä»¶
+    return {  };
+  }());
+
+  function imageLoaded() {
+    this.loadedAssets += 1;
+    if (this.loadedAssets === this.totalImages && this.loadedFootagesCount === this.totalFootages) {
+      if (this.imagesLoadedCb) {
+        this.imagesLoadedCb(null);
+      }
+    }
+  }
+  function footageLoaded() {
+    this.loadedFootagesCount += 1;
+    if (this.loadedAssets === this.totalImages && this.loadedFootagesCount === this.totalFootages) {
+      if (this.imagesLoadedCb) {
+        this.imagesLoadedCb(null);
+      }
+    }
+  }
+
+  function getAssetsPath(assetData, assetsPath, originalPath) {
+    var path = '';
+    if (assetData.e) {
+      path = assetData.p;
+    } else if (assetsPath) {
+      var imagePath = assetData.p;
+      if (imagePath.indexOf('images/') !== -1) {
+        imagePath = imagePath.split('/')[1];
+      }
+      path = assetsPath + imagePath;
+    } else {
+      path = originalPath;
+      path += assetData.u ? assetData.u : '';
+      path += assetData.p;
+    }
+    return path;
+  }
+
+  function testImageLoaded(img) {
+    var _count = 0;
+    var intervalId = setInterval(function () {
+      var box = img.getBBox();
+      if (box.width || _count > 500) {
+        this._imageLoaded();
+        clearInterval(intervalId);
+      }
+      _count += 1;
+    }.bind(this), 50);
+  }
+
+  function generatePixelMapAndRefreshUI2(data, ob, callback) {
+    let image_source = image.createImageSource(data)
+    //piexlmapæ”¹æˆä¸å¯ç¼–è¾‘çŠ¶æ€ï¼Œä¼˜åŒ–å›¾å½¢å›¾åƒç«¯è¯»å–é€Ÿåº¦
+    let opts = {
+        editable: false,
+        desiredPixelFormat: image.PixelMapFormat.RGBA_8888
+    };
+    //åˆ›å»ºpixel_map
+    image_source?.createPixelMap(opts, (err, pixel_map) => {
+      if (!err) {
+        ob.img.pixel_map = pixel_map;
+        if (ob.assetData && ob.assetData.w && ob.assetData.h) {
+          ob.img.width = ob.assetData.w;
+          ob.img.height = ob.assetData.h;
+          callback();
+        } else {
+          //è·å–è§£æå‡ºæ¥çš„pixel_mapçš„å®½ã€é«˜
+          pixel_map.getImageInfo().then((image_info) => {
+            ob.img.width = image_info.size.width;
+            ob.img.height = image_info.size.height;
+            callback();
+          });
+        }
+      } else {
+        callback();
+      }
+    });
+  }
+
+  function createImageData(assetData) {
+    var path = getAssetsPath(assetData, this.assetsPath, this.path);
+    var img = createNS('image');
+    if (isSafari) {
+      this.testImageLoaded(img);
+    } else {
+      img.addEventListener('load', this._imageLoaded, false);
+    }
+    img.addEventListener('error', function () {
+      ob.img = proxyImage;
+      this._imageLoaded();
+    }.bind(this), false);
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', path);
+    if (this._elementHelper.append) {
+      this._elementHelper.append(img);
+    } else {
+      this._elementHelper.appendChild(img);
+    }
+    var ob = {
+      img: img,
+      assetData: assetData,
+    };
+    return ob;
+  }
+
+  function createImgData(assetData) {
+    var path = getAssetsPath(assetData, this.assetsPath, this.path);
+    var context = this.context;
+    if (context == null) {
+      context = getContext();
+    }
+    //å› OpenHarmonyæ— æ³•é€šè¿‡createTagåˆ›å»ºhtmlä¸­çš„imgæ ‡ç­¾ï¼Œæ‰€ä»¥è¿™é‡Œæ„é€ ä¸€ä¸ªimgå¯¹è±¡ï¼ŒåŒè¿›æ·»åŠ å…¶ä½¿ç”¨åˆ°çš„addEventListeneræ–¹æ³•
+    var img = {
+      addEventListener: function (type, callback, flag) {
+        if (type === "load") {
+            if (this._imageAssetDelegate) {
+                this._imageAssetDelegate(path, (err, pixel_map) => {
+                  if (pixel_map == null) {
+                    //assetData.eå€¼æ˜¯ä¸å”¯ä¸€çš„å‚æ•°ï¼Œæ‰€ä»¥ç”±assetData.på€¼æ¥åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯base64å›¾ç‰‡èµ„æºï¼Œè¿˜æ˜¯å¤–éƒ¨å›¾ç‰‡èµ„æº
+                    if (SOURCE_BASE64.test(assetData.p)) { //æ­£åˆ™è¡¨è¾¾å¼åˆ¤æ–­æ˜¯å¦å«æœ‰data:image/;base64å­—æ®µ
+                      readBase64(assetData, ob, callback); //base64å›¾ç‰‡
+                    } else { //rawfileèµ„æºå›¾ç‰‡
+                      readRawFile(context, assetData, ob, callback);
+                    }
+                  } else {
+                    ob.img.pixel_map = pixel_map;
+                    if (ob.assetData && ob.assetData.w && ob.assetData.h) {
+                      ob.img.width = ob.assetData.w;
+                      ob.img.height = ob.assetData.h;
+                      callback();
+                    } else {
+                      //è·å–è§£æå‡ºæ¥çš„pixel_mapçš„å®½ã€é«˜
+                      pixel_map.getImageInfo().then((image_info) => {
+                        ob.img.width = image_info.size.width;
+                        ob.img.height = image_info.size.height;
+                        callback();
+                      });
+                    }
+                  }
+                });
+                return;
+            }
+          //assetData.eå€¼æ˜¯ä¸å”¯ä¸€çš„å‚æ•°ï¼Œæ‰€ä»¥ç”±assetData.på€¼æ¥åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯base64å›¾ç‰‡èµ„æºï¼Œè¿˜æ˜¯å¤–éƒ¨å›¾ç‰‡èµ„æº
+          if (SOURCE_BASE64.test(assetData.p)) { //æ­£åˆ™è¡¨è¾¾å¼åˆ¤æ–­æ˜¯å¦å«æœ‰data:image/;base64å­—æ®µ
+            readBase64(assetData, ob, callback); //base64å›¾ç‰‡
+          } else { //rawfileèµ„æºå›¾ç‰‡
+            readRawFile(context, assetData, ob, callback);
+          }
+        }
+      }.bind(this)
+    };
+    var ob = {
+      img: img,
+      assetData: assetData,
+    };
+    img.crossOrigin = 'anonymous';
+    img.addEventListener('load', this._imageLoaded, false);
+    img.addEventListener('error', function () {
+      ob.img = proxyImage;
+      this._imageLoaded();
+    }.bind(this), false);
+    img.src = path;
+    return ob;
+  }
+
+  function readBase64(assetData, ob, callback) {
+    //generatePixelMapAndRefreshUIçš„å…¥å‚obå¯èƒ½ä¸ºundefinedï¼Œæ‰€ä»¥è¿™é‡Œéœ€è¦æ¯éš”ä¸€æ®µæ—¶é—´æ£€æµ‹ä¸€ä¸‹obæ˜¯å¦å®ä¾‹åŒ–å¥½äº†
+    let task_id = setInterval(() => {
+      if (!ob) {
+        return
+      }
+      generatePixelMapAndRefreshUI2(assetData.p, ob, callback)
+      //å–æ¶ˆå¾ªç¯æ£€æµ‹
+      clearInterval(task_id)
+    }, 10)
+  }
+
+  function readRawFile(context, assetData, ob, callback) {
+    //æ‹¼æ¥rawfile url
+    let res = assetData.u + assetData.p; //->common/image/lottie/icon.png
+    try {
+      let filePath = context.filesDir + '/' + res;
+      let isExist = fs.accessSync(filePath); //åˆ¤æ–­å›¾ç‰‡èµ„æºæ˜¯å¦å­˜åœ¨
+      if (isExist) {
+        let file = fs.openSync(filePath, fs.OpenMode.READ_ONLY);
+        let stat = fs.statSync(filePath);
+        let arrayBuffer = new ArrayBuffer(stat.size);
+        fs.read(file.fd, arrayBuffer, (err, readLen) => {
+          if (!!!err) {
+            generatePixelMapAndRefreshUI2(arrayBuffer, ob, callback);
+          } else {
+            //åŠ è½½ä¾èµ–å›¾ç‰‡å¼‚å¸¸æ—¶ï¼Œé»˜è®¤åŠ¨ç”»åŠ è½½æ­£å¸¸
+            callback();
+          }
+          fs.close(file)
+        })
+      } else {
+        //è·å–rawfileçš„å­—èŠ‚æ•°ç»„æ•°æ®
+        context.resourceManager.getRawFileContent(res, (err, raw_file_content) => {
+          if (!!!err) {
+            generatePixelMapAndRefreshUI2(raw_file_content.buffer, ob, callback);
+          } else {
+            //åŠ è½½ä¾èµ–å›¾ç‰‡å¼‚å¸¸æ—¶ï¼Œé»˜è®¤åŠ¨ç”»åŠ è½½æ­£å¸¸
+            callback();
+          }
+        })
+      }
+    } catch (err) {
+      LogUtil.error('Method readRawFile execute error: ' + JSON.stringify(err));
+    }
+  }
+
+  function createFootageData(data) {
+    var ob = {
+      assetData: data,
+    };
+    var path = getAssetsPath(data, this.assetsPath, this.path);
+    dataManager.loadData(path, function (footageData) {
+      ob.img = footageData;
+      this._footageLoaded();
+    }.bind(this), function () {
+      ob.img = {};
+      this._footageLoaded();
+    }.bind(this));
+    return ob;
+  }
+
+  function loadAssets(assets, cb) {
+    this.imagesLoadedCb = cb;
+    var i;
+    var len = assets.length;
+    for (i = 0; i < len; i += 1) {
+      if (!assets[i].layers) {
+        if (this.imagePath && this.imagePath != '') {
+          assets[i].u = this.imagePath;
+        }
+        if (!assets[i].t || assets[i].t === 'seq') {
+          this.totalImages += 1;
+          this.images.push(this._createImageData(assets[i]));
+        } else if (assets[i].t === 3) {
+          this.totalFootages += 1;
+          this.images.push(this.createFootageData(assets[i]));
+        }
+      }
+    }
+  }
+
+  function setPath(path) {
+    this.path = path || '';
+  }
+
+  function setAssetsPath(path) {
+    this.assetsPath = path || '';
+  }
+
+  function getAsset(assetData) {
+    var i = 0;
+    var len = this.images.length;
+    while (i < len) {
+      if (this.images[i].assetData === assetData) {
+        return this.images[i].img;
+      }
+      i += 1;
+    }
+    return null;
+  }
+
+  function destroy() {
+    this.imagesLoadedCb = null;
+    this.images.length = 0;
+  }
+
+  function loadedImages() {
+    return this.totalImages === this.loadedAssets;
+  }
+
+  function loadedFootages() {
+    return this.totalFootages === this.loadedFootagesCount;
+  }
+
+  function setImageAssetDelegate(imageAssetDelegate) {
+    this._imageAssetDelegate = imageAssetDelegate;
+  }
+
+  function setCacheType(type, elementHelper, context, imagePath) {
+    this.context = context;
+    this.imagePath = imagePath;
+    if (type === 'svg') {
+      this._elementHelper = elementHelper;
+      this._createImageData = this.createImageData.bind(this);
+    } else {
+      this._createImageData = this.createImgData.bind(this);
+    }
+  }
+
+  function ImagePreloaderFactory() {
+    this._imageLoaded = imageLoaded.bind(this);
+    this._footageLoaded = footageLoaded.bind(this);
+    this._imageAssetDelegate = null;
+    this.testImageLoaded = testImageLoaded.bind(this);
+    this.createFootageData = createFootageData.bind(this);
+    this.assetsPath = '';
+    this.path = '';
+    this.totalImages = 0;
+    this.totalFootages = 0;
+    this.loadedAssets = 0;
+    this.loadedFootagesCount = 0;
+    this.imagesLoadedCb = null;
+    this.images = [];
+    this.context = null;
+    this.imagePath = '';
+  }
+
+  ImagePreloaderFactory.prototype = {
+    loadAssets: loadAssets,
+    setAssetsPath: setAssetsPath,
+    setPath: setPath,
+    loadedImages: loadedImages,
+    loadedFootages: loadedFootages,
+    destroy: destroy,
+    getAsset: getAsset,
+    createImgData: createImgData,
+    createImageData: createImageData,
+    imageLoaded: imageLoaded,
+    footageLoaded: footageLoaded,
+    setCacheType: setCacheType,
+    setImageAssetDelegate: setImageAssetDelegate,
+  };
+
+  return ImagePreloaderFactory;
+}());
+
+export default ImagePreloader;
+ÔrF–¶@ohos.multimedia.image­@ohos.file.fs¨./common¶./helpers/svg_elements­./DataManager©./LogUtilÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÃÙ[ hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.multimedia.image.d.tsAÃªoh-resolveÂGAÃÙR hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.file.fs.d.tsAÃªoh-resolveÂGAÂÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\svg_elements.jsAÃªoh-resolveÂGAÂÙ–D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataManager.jsAÃªoh-resolveÂGAÂÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache–ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration $‘ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifier	ÔrL”¤type¥start£end¤nameªIdentifier	¨isSafariLªIdentifier	¨isSafariÔrM•¤type¥start£end¥value£raw§Literal#¨./commonª'./common'J±ImportDeclaration&ÌT‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifier-5LªIdentifier-5¨createNSM§Literal;ÌS¶./helpers/svg_elements¸'./helpers/svg_elements'J±ImportDeclarationÌVÌ~‘N¶ImportDefaultSpecifierÌ]ÌhLªIdentifierÌ]Ìh«dataManagerM§LiteralÌnÌ}­./DataManager¯'./DataManager'J±ImportDeclarationÌ€Ì«‘N¶ImportDefaultSpecifierÌ‡ÌŒLªIdentifierÌ‡ÌŒ¥imageM§LiteralÌ’Ìª¶@ohos.multimedia.image¸'@ohos.multimedia.image'J±ImportDeclarationÌ­ÌÌ‘N¶ImportDefaultSpecifierÌ´Ì¶LªIdentifierÌ´Ì¶¢fsM§LiteralÌ¼ÌË­@ohos.file.fs¯'@ohos.file.fs'J±ImportDeclarationÌÎÌï‘K¯ImportSpecifierÌÖÌİLªIdentifierÌÖÌİ§LogUtilLªIdentifierÌÖÌİ§LogUtilM§LiteralÌäÌï©./LogUtil«'./LogUtil'

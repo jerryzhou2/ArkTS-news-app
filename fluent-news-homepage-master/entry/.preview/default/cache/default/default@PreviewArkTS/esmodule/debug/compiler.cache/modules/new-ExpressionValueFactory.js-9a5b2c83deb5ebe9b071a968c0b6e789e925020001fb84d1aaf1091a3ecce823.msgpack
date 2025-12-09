@@ -1,0 +1,305 @@
+‘r@ü™assertions§code¥customTransformCache¨dependencies¢id§meta±moduleSideEffects¨originalCode±originalSourcemap´resolvedIdsÆsourcemapChainµsyntheticNamedExportsµtransformDependenciesÆtransformFiles®cacheAst‘rAê⁄import {
+  createTypedArray,
+} from '../helpers/arrays';
+
+const ExpressionPropertyInterface = (function () {
+  var defaultUnidimensionalValue = { pv: 0, v: 0, mult: 1 };
+  var defaultMultidimensionalValue = { pv: [0, 0, 0], v: [0, 0, 0], mult: 1 };
+
+  function completeProperty(expressionValue, property, type) {
+    Object.defineProperty(expressionValue, 'velocity', {
+      get: function () {
+        return property.getVelocityAtTime(property.comp.currentFrame);
+      },
+    });
+    expressionValue.numKeys = property.keyframes ? property.keyframes.length : 0;
+    expressionValue.key = function (pos) {
+      if (!expressionValue.numKeys) {
+        return 0;
+      }
+      var value = '';
+      if ('s' in property.keyframes[pos - 1]) {
+        value = property.keyframes[pos - 1].s;
+      } else if ('e' in property.keyframes[pos - 2]) {
+        value = property.keyframes[pos - 2].e;
+      } else {
+        value = property.keyframes[pos - 2].s;
+      }
+      var valueProp = type === 'unidimensional' ? new Number(value) : Object.assign({}, value); // eslint-disable-line no-new-wrappers
+      valueProp.time = property.keyframes[pos - 1].t / property.elem.comp.globalData.frameRate;
+      valueProp.value = type === 'unidimensional' ? value[0] : value;
+      return valueProp;
+    };
+    expressionValue.valueAtTime = property.getValueAtTime;
+    expressionValue.speedAtTime = property.getSpeedAtTime;
+    expressionValue.velocityAtTime = property.getVelocityAtTime;
+    expressionValue.propertyGroup = property.propertyGroup;
+  }
+
+  function UnidimensionalPropertyInterface(property) {
+    if (!property || !('pv' in property)) {
+      property = defaultUnidimensionalValue;
+    }
+    var mult = 1 / property.mult;
+    var val = property.pv * mult;
+    var expressionValue = new Number(val); // eslint-disable-line no-new-wrappers
+    expressionValue.value = val;
+    completeProperty(expressionValue, property, 'unidimensional');
+
+    return function () {
+      if (property.k) {
+        property.getValue();
+      }
+      val = property.v * mult;
+      if (expressionValue.value !== val) {
+        expressionValue = new Number(val); // eslint-disable-line no-new-wrappers
+        expressionValue.value = val;
+        completeProperty(expressionValue, property, 'unidimensional');
+      }
+      return expressionValue;
+    };
+  }
+
+  function MultidimensionalPropertyInterface(property) {
+    if (!property || !('pv' in property)) {
+      property = defaultMultidimensionalValue;
+    }
+    var mult = 1 / property.mult;
+    var len = (property.data && property.data.l) || property.pv.length;
+    var expressionValue = createTypedArray('float32', len);
+    var arrValue = createTypedArray('float32', len);
+    expressionValue.value = arrValue;
+    completeProperty(expressionValue, property, 'multidimensional');
+
+    return function () {
+      if (property.k) {
+        property.getValue();
+      }
+      for (var i = 0; i < len; i += 1) {
+        arrValue[i] = property.v[i] * mult;
+        expressionValue[i] = arrValue[i];
+      }
+      return expressionValue;
+    };
+  }
+
+  // TODO: try to avoid using this getter
+  function defaultGetter() {
+    return defaultUnidimensionalValue;
+  }
+
+  return function (property) {
+    if (!property) {
+      return defaultGetter;
+    } if (property.propType === 'unidimensional') {
+      return UnidimensionalPropertyInterface(property);
+    }
+    return MultidimensionalPropertyInterface(property);
+  };
+}());
+
+export default ExpressionPropertyInterface;
+¬ëŸôD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\arrays.jsŸ≠D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionValueFactory.js‘rBò±isLocalDependencyØisNodeEntryFileßpkgPathßpkgName™pkgVersion±belongProjectPath±dependencyPkgInfo®commonjs¬¬ŸuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¨@ohos/lottie¶2.0.25Ÿ8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master‘rCíßpkgName™pkgVersion¨@ohos/lottie¶2.0.25‘rDí∞hasDefaultExport™isCommonJS√¬√⁄import {
+  createTypedArray,
+} from '../helpers/arrays';
+
+const ExpressionPropertyInterface = (function () {
+  var defaultUnidimensionalValue = { pv: 0, v: 0, mult: 1 };
+  var defaultMultidimensionalValue = { pv: [0, 0, 0], v: [0, 0, 0], mult: 1 };
+
+  function completeProperty(expressionValue, property, type) {
+    Object.defineProperty(expressionValue, 'velocity', {
+      get: function () {
+        return property.getVelocityAtTime(property.comp.currentFrame);
+      },
+    });
+    expressionValue.numKeys = property.keyframes ? property.keyframes.length : 0;
+    expressionValue.key = function (pos) {
+      if (!expressionValue.numKeys) {
+        return 0;
+      }
+      var value = '';
+      if ('s' in property.keyframes[pos - 1]) {
+        value = property.keyframes[pos - 1].s;
+      } else if ('e' in property.keyframes[pos - 2]) {
+        value = property.keyframes[pos - 2].e;
+      } else {
+        value = property.keyframes[pos - 2].s;
+      }
+      var valueProp = type === 'unidimensional' ? new Number(value) : Object.assign({}, value); // eslint-disable-line no-new-wrappers
+      valueProp.time = property.keyframes[pos - 1].t / property.elem.comp.globalData.frameRate;
+      valueProp.value = type === 'unidimensional' ? value[0] : value;
+      return valueProp;
+    };
+    expressionValue.valueAtTime = property.getValueAtTime;
+    expressionValue.speedAtTime = property.getSpeedAtTime;
+    expressionValue.velocityAtTime = property.getVelocityAtTime;
+    expressionValue.propertyGroup = property.propertyGroup;
+  }
+
+  function UnidimensionalPropertyInterface(property) {
+    if (!property || !('pv' in property)) {
+      property = defaultUnidimensionalValue;
+    }
+    var mult = 1 / property.mult;
+    var val = property.pv * mult;
+    var expressionValue = new Number(val); // eslint-disable-line no-new-wrappers
+    expressionValue.value = val;
+    completeProperty(expressionValue, property, 'unidimensional');
+
+    return function () {
+      if (property.k) {
+        property.getValue();
+      }
+      val = property.v * mult;
+      if (expressionValue.value !== val) {
+        expressionValue = new Number(val); // eslint-disable-line no-new-wrappers
+        expressionValue.value = val;
+        completeProperty(expressionValue, property, 'unidimensional');
+      }
+      return expressionValue;
+    };
+  }
+
+  function MultidimensionalPropertyInterface(property) {
+    if (!property || !('pv' in property)) {
+      property = defaultMultidimensionalValue;
+    }
+    var mult = 1 / property.mult;
+    var len = (property.data && property.data.l) || property.pv.length;
+    var expressionValue = createTypedArray('float32', len);
+    var arrValue = createTypedArray('float32', len);
+    expressionValue.value = arrValue;
+    completeProperty(expressionValue, property, 'multidimensional');
+
+    return function () {
+      if (property.k) {
+        property.getValue();
+      }
+      for (var i = 0; i < len; i += 1) {
+        arrValue[i] = property.v[i] * mult;
+        expressionValue[i] = arrValue[i];
+      }
+      return expressionValue;
+    };
+  }
+
+  // TODO: try to avoid using this getter
+  function defaultGetter() {
+    return defaultUnidimensionalValue;
+  }
+
+  return function (property) {
+    if (!property) {
+      return defaultGetter;
+    } if (property.propType === 'unidimensional') {
+      return UnidimensionalPropertyInterface(property);
+    }
+    return MultidimensionalPropertyInterface(property);
+  };
+}());
+
+export default ExpressionPropertyInterface;
+‘rEïßversion®mappings•namesßsourcesÆsourcesContent‹ fëî    ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî  	 ëî  
+ ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî    ëî  ! ëî  " ëî  # ëî  $ ëî  % ëî  & ëî  ' ëî  ( ëî  ) ëî  * ëî  + ëî  , ëî  - ëî  . ëî  / ëî  0 ëî  1 ëî  2 ëî  3 ëî  4 ëî  5 ëî  6 ëî  7 ëî  8 ëî  9 ëî  : ëî  ; ëî  < ëî  = ëî  > ëî  ? ëî  Ã@ ëî  ÃA ëî  ÃB ëî  ÃC ëî  ÃD ëî  ÃE ëî  ÃF ëî  ÃG ëî  ÃH ëî  ÃI ëî  ÃJ ëî  ÃK ëî  ÃL ëî  ÃM ëî  ÃN ëî  ÃO ëî  ÃP ëî  ÃQ ëî  ÃR ëî  ÃS ëî  ÃT ëî  ÃU ëî  ÃV ëî  ÃW ëî  ÃX ëî  ÃY ëî  ÃZ ëî  Ã[ ëî  Ã\ ëî  Ã] ëî  Ã^ ëî  Ã_ ëî  Ã` ëî  Ãa ëî  Ãb ëî  Ãc ëî  Ãd êêëŸ≠D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionValueFactory.jsë⁄import {
+  createTypedArray,
+} from '../helpers/arrays';
+
+const ExpressionPropertyInterface = (function () {
+  var defaultUnidimensionalValue = { pv: 0, v: 0, mult: 1 };
+  var defaultMultidimensionalValue = { pv: [0, 0, 0], v: [0, 0, 0], mult: 1 };
+
+  function completeProperty(expressionValue, property, type) {
+    Object.defineProperty(expressionValue, 'velocity', {
+      get: function () {
+        return property.getVelocityAtTime(property.comp.currentFrame);
+      },
+    });
+    expressionValue.numKeys = property.keyframes ? property.keyframes.length : 0;
+    expressionValue.key = function (pos) {
+      if (!expressionValue.numKeys) {
+        return 0;
+      }
+      var value = '';
+      if ('s' in property.keyframes[pos - 1]) {
+        value = property.keyframes[pos - 1].s;
+      } else if ('e' in property.keyframes[pos - 2]) {
+        value = property.keyframes[pos - 2].e;
+      } else {
+        value = property.keyframes[pos - 2].s;
+      }
+      var valueProp = type === 'unidimensional' ? new Number(value) : Object.assign({}, value); // eslint-disable-line no-new-wrappers
+      valueProp.time = property.keyframes[pos - 1].t / property.elem.comp.globalData.frameRate;
+      valueProp.value = type === 'unidimensional' ? value[0] : value;
+      return valueProp;
+    };
+    expressionValue.valueAtTime = property.getValueAtTime;
+    expressionValue.speedAtTime = property.getSpeedAtTime;
+    expressionValue.velocityAtTime = property.getVelocityAtTime;
+    expressionValue.propertyGroup = property.propertyGroup;
+  }
+
+  function UnidimensionalPropertyInterface(property) {
+    if (!property || !('pv' in property)) {
+      property = defaultUnidimensionalValue;
+    }
+    var mult = 1 / property.mult;
+    var val = property.pv * mult;
+    var expressionValue = new Number(val); // eslint-disable-line no-new-wrappers
+    expressionValue.value = val;
+    completeProperty(expressionValue, property, 'unidimensional');
+
+    return function () {
+      if (property.k) {
+        property.getValue();
+      }
+      val = property.v * mult;
+      if (expressionValue.value !== val) {
+        expressionValue = new Number(val); // eslint-disable-line no-new-wrappers
+        expressionValue.value = val;
+        completeProperty(expressionValue, property, 'unidimensional');
+      }
+      return expressionValue;
+    };
+  }
+
+  function MultidimensionalPropertyInterface(property) {
+    if (!property || !('pv' in property)) {
+      property = defaultMultidimensionalValue;
+    }
+    var mult = 1 / property.mult;
+    var len = (property.data && property.data.l) || property.pv.length;
+    var expressionValue = createTypedArray('float32', len);
+    var arrValue = createTypedArray('float32', len);
+    expressionValue.value = arrValue;
+    completeProperty(expressionValue, property, 'multidimensional');
+
+    return function () {
+      if (property.k) {
+        property.getValue();
+      }
+      for (var i = 0; i < len; i += 1) {
+        arrValue[i] = property.v[i] * mult;
+        expressionValue[i] = arrValue[i];
+      }
+      return expressionValue;
+    };
+  }
+
+  // TODO: try to avoid using this getter
+  function defaultGetter() {
+    return defaultUnidimensionalValue;
+  }
+
+  return function (property) {
+    if (!property) {
+      return defaultGetter;
+    } if (property.propType === 'unidimensional') {
+      return UnidimensionalPropertyInterface(property);
+    }
+    return MultidimensionalPropertyInterface(property);
+  };
+}());
+
+export default ExpressionPropertyInterface;
+‘rFë±../helpers/arrays‘rGó™assertions®external¢id§meta±moduleSideEffects™resolvedByµsyntheticNamedExportsA¬ŸôD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\arrays.jsA√™oh-resolve¬ë‘rHíßmissing¶plugin√¶genAbc¬ê‘  ‘rIî≤dynamicImportCacheπexportAllDeclarationCacheªexportNamedDeclarationCache´importCacheêêêë‘rJï§type•start£end™specifiers¶source±ImportDeclaration :ë‘rKï§type•start£end®imported•localØImportSpecifier‘rLî§type•start£end§name™Identifier∞createTypedArrayL™Identifier∞createTypedArray‘rMï§type•start£end•value£rawßLiteral&9±../helpers/arrays≥'../helpers/arrays'

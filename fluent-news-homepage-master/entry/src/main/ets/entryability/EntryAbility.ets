@@ -16,13 +16,30 @@
 import { AbilityConstant, UIAbility, Configuration, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { ShareService } from 'aggregated_share';
 
 export default class EntryAbility extends UIAbility {
+  // 实例化分享服务
+  private shareServiceImpl: ShareService =
+    ShareService.create()
+      // todo 填写微信开放平台配置的应用AppID
+      .initWX('wxc92d9d6570127a32')
+      // todo 填写QQ互联平台配置的应用AppID
+      .initQQ(102061317);
+
+  onNewWant(want: Want): void {
+    this.shareServiceImpl.handleWant(want, this.context);
+  }
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
     // 缓存当前设备的颜色模式
     AppStorage.setOrCreate('currentColorMode', this.context.config.colorMode);
     hilog.info(0x0000, 'testTag', `currentColorMode: ${this.context.config.colorMode}`);
+    // 初始化全局搜索关键字
+    AppStorage.setOrCreate('searchKeyword', '');
+
+    this.shareServiceImpl.handleWant(want, this.context);
   }
 
   onDestroy(): void {

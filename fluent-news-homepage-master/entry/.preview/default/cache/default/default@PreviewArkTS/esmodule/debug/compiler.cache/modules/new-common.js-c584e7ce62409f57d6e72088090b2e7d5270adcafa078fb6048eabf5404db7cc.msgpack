@@ -1,0 +1,843 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚäimport {
+  createSizedArray,
+} from './helpers/arrays';
+
+let subframeEnabled = true;
+let expressionsPlugin = null;
+let expressionsInterfaces = null;
+let idPrefix = '';
+const isSafari = false;
+let _shouldRoundValues = false;
+const bmPow = Math.pow;
+const bmSqrt = Math.sqrt;
+const bmFloor = Math.floor;
+const bmMax = Math.max;
+const bmMin = Math.min;
+
+const BMMath = {};
+(function () {
+  var propertyNames = ['abs', 'acos', 'acosh', 'asin', 'asinh', 'atan', 'atanh', 'atan2', 'ceil', 'cbrt', 'expm1', 'clz32', 'cos', 'cosh', 'exp', 'floor', 'fround', 'hypot', 'imul', 'log', 'log1p', 'log2', 'log10', 'max', 'min', 'pow', 'random', 'round', 'sign', 'sin', 'sinh', 'sqrt', 'tan', 'tanh', 'trunc', 'E', 'LN10', 'LN2', 'LOG10E', 'LOG2E', 'PI', 'SQRT1_2', 'SQRT2'];
+  var i;
+  var len = propertyNames.length;
+  for (i = 0; i < len; i += 1) {
+    BMMath[propertyNames[i]] = Math[propertyNames[i]];
+  }
+}());
+
+function ProjectInterface() { return {}; }
+BMMath.random = Math.random;
+BMMath.abs = function (val) {
+  var tOfVal = typeof val;
+  if (tOfVal === 'object' && val.length) {
+    var absArr = createSizedArray(val.length);
+    var i;
+    var len = val.length;
+    for (i = 0; i < len; i += 1) {
+      absArr[i] = Math.abs(val[i]);
+    }
+    return absArr;
+  }
+  return Math.abs(val);
+};
+let defaultCurveSegments = 150;
+const degToRads = Math.PI / 180;
+const roundCorner = 0.5519;
+
+function roundValues(flag) {
+  _shouldRoundValues = !!flag;
+}
+
+function bmRnd(value) {
+  if (_shouldRoundValues) {
+    return Math.round(value);
+  }
+  return value;
+}
+
+function styleDiv(element) {
+  element.style.position = 'absolute';
+  element.style.top = 0;
+  element.style.left = 0;
+  element.style.display = 'block';
+  element.style.transformOrigin = '0 0';
+  element.style.webkitTransformOrigin = '0 0';
+  element.style.backfaceVisibility = 'visible';
+  element.style.webkitBackfaceVisibility = 'visible';
+  element.style.transformStyle = 'preserve-3d';
+  element.style.webkitTransformStyle = 'preserve-3d';
+  element.style.mozTransformStyle = 'preserve-3d';
+}
+
+function BMEnterFrameEvent(type, currentTime, totalTime, frameMultiplier) {
+  this.type = type;
+  this.currentTime = currentTime;
+  this.totalTime = totalTime;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMCompleteEvent(type, frameMultiplier) {
+  this.type = type;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMCompleteLoopEvent(type, totalLoops, currentLoop, frameMultiplier) {
+  this.type = type;
+  this.currentLoop = currentLoop;
+  this.totalLoops = totalLoops;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMSegmentStartEvent(type, firstFrame, totalFrames) {
+  this.type = type;
+  this.firstFrame = firstFrame;
+  this.totalFrames = totalFrames;
+}
+
+function BMDestroyEvent(type, target) {
+  this.type = type;
+  this.target = target;
+}
+
+function BMRenderFrameErrorEvent(nativeError, currentTime) {
+  this.type = 'renderFrameError';
+  this.nativeError = nativeError;
+  this.currentTime = currentTime;
+}
+
+function BMConfigErrorEvent(nativeError) {
+  this.type = 'configError';
+  this.nativeError = nativeError;
+}
+
+function BMAnimationConfigErrorEvent(type, nativeError) {
+  this.type = type;
+  this.nativeError = nativeError;
+}
+
+const createElementID = (function () {
+  var _count = 0;
+  return function createID() {
+    _count += 1;
+    return idPrefix + '__lottie_element_' + _count;
+  };
+}());
+
+function HSVtoRGB(h, s, v) {
+  var r;
+  var g;
+  var b;
+  var i;
+  var f;
+  var p;
+  var q;
+  var t;
+  i = Math.floor(h * 6);
+  f = h * 6 - i;
+  p = v * (1 - s);
+  q = v * (1 - f * s);
+  t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    case 5: r = v; g = p; b = q; break;
+    default: break;
+  }
+  return [r,
+    g,
+    b];
+}
+
+function RGBtoHSV(r, g, b) {
+  var max = Math.max(r, g, b);
+  var min = Math.min(r, g, b);
+  var d = max - min;
+  var h;
+  var s = (max === 0 ? 0 : d / max);
+  var v = max / 255;
+
+  switch (max) {
+    case min: h = 0; break;
+    case r: h = (g - b) + d * (g < b ? 6 : 0); h /= 6 * d; break;
+    case g: h = (b - r) + d * 2; h /= 6 * d; break;
+    case b: h = (r - g) + d * 4; h /= 6 * d; break;
+    default: break;
+  }
+
+  return [
+    h,
+    s,
+    v,
+  ];
+}
+
+function addSaturationToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[1] += offset;
+  if (hsv[1] > 1) {
+    hsv[1] = 1;
+  } else if (hsv[1] <= 0) {
+    hsv[1] = 0;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+function addBrightnessToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[2] += offset;
+  if (hsv[2] > 1) {
+    hsv[2] = 1;
+  } else if (hsv[2] < 0) {
+    hsv[2] = 0;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+function addHueToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[0] += offset / 360;
+  if (hsv[0] > 1) {
+    hsv[0] -= 1;
+  } else if (hsv[0] < 0) {
+    hsv[0] += 1;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+const rgbToHex = (function () {
+  var colorMap = [];
+  var i;
+  var hex;
+  for (i = 0; i < 256; i += 1) {
+    hex = i.toString(16);
+    colorMap[i] = hex.length === 1 ? '0' + hex : hex;
+  }
+
+  return function (r, g, b) {
+    if (r < 0) {
+      r = 0;
+    }
+    if (g < 0) {
+      g = 0;
+    }
+    if (b < 0) {
+      b = 0;
+    }
+    return '#' + colorMap[r] + colorMap[g] + colorMap[b];
+  };
+}());
+
+const setSubframeEnabled = (flag) => { subframeEnabled = !!flag; };
+const getSubframeEnabled = () => subframeEnabled;
+const setExpressionsPlugin = (value) => { expressionsPlugin = value; };
+const getExpressionsPlugin = () => expressionsPlugin;
+const setExpressionInterfaces = (value) => { expressionsInterfaces = value; };
+const getExpressionInterfaces = () => expressionsInterfaces;
+const setDefaultCurveSegments = (value) => { defaultCurveSegments = value; };
+const getDefaultCurveSegments = () => defaultCurveSegments;
+const setIdPrefix = (value) => { idPrefix = value; };
+const getIdPrefix = () => idPrefix;
+
+export {
+  setSubframeEnabled,
+  getSubframeEnabled,
+  setExpressionsPlugin,
+  getExpressionsPlugin,
+  setExpressionInterfaces,
+  getExpressionInterfaces,
+  setDefaultCurveSegments,
+  getDefaultCurveSegments,
+  isSafari,
+  bmPow,
+  bmSqrt,
+  bmFloor,
+  bmMax,
+  bmMin,
+  degToRads,
+  roundCorner,
+  styleDiv,
+  bmRnd,
+  roundValues,
+  BMEnterFrameEvent,
+  BMCompleteEvent,
+  BMCompleteLoopEvent,
+  BMSegmentStartEvent,
+  BMDestroyEvent,
+  BMRenderFrameErrorEvent,
+  BMConfigErrorEvent,
+  BMAnimationConfigErrorEvent,
+  createElementID,
+  addSaturationToRGB,
+  addBrightnessToRGB,
+  addHueToRGB,
+  rgbToHex,
+  setIdPrefix,
+  getIdPrefix,
+  BMMath,
+  ProjectInterface,
+};
+Â‘Ù™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\arrays.jsÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’¯hasNamedExportsªisCommonJSÃÂÃÚäimport {
+  createSizedArray,
+} from './helpers/arrays';
+
+let subframeEnabled = true;
+let expressionsPlugin = null;
+let expressionsInterfaces = null;
+let idPrefix = '';
+const isSafari = false;
+let _shouldRoundValues = false;
+const bmPow = Math.pow;
+const bmSqrt = Math.sqrt;
+const bmFloor = Math.floor;
+const bmMax = Math.max;
+const bmMin = Math.min;
+
+const BMMath = {};
+(function () {
+  var propertyNames = ['abs', 'acos', 'acosh', 'asin', 'asinh', 'atan', 'atanh', 'atan2', 'ceil', 'cbrt', 'expm1', 'clz32', 'cos', 'cosh', 'exp', 'floor', 'fround', 'hypot', 'imul', 'log', 'log1p', 'log2', 'log10', 'max', 'min', 'pow', 'random', 'round', 'sign', 'sin', 'sinh', 'sqrt', 'tan', 'tanh', 'trunc', 'E', 'LN10', 'LN2', 'LOG10E', 'LOG2E', 'PI', 'SQRT1_2', 'SQRT2'];
+  var i;
+  var len = propertyNames.length;
+  for (i = 0; i < len; i += 1) {
+    BMMath[propertyNames[i]] = Math[propertyNames[i]];
+  }
+}());
+
+function ProjectInterface() { return {}; }
+BMMath.random = Math.random;
+BMMath.abs = function (val) {
+  var tOfVal = typeof val;
+  if (tOfVal === 'object' && val.length) {
+    var absArr = createSizedArray(val.length);
+    var i;
+    var len = val.length;
+    for (i = 0; i < len; i += 1) {
+      absArr[i] = Math.abs(val[i]);
+    }
+    return absArr;
+  }
+  return Math.abs(val);
+};
+let defaultCurveSegments = 150;
+const degToRads = Math.PI / 180;
+const roundCorner = 0.5519;
+
+function roundValues(flag) {
+  _shouldRoundValues = !!flag;
+}
+
+function bmRnd(value) {
+  if (_shouldRoundValues) {
+    return Math.round(value);
+  }
+  return value;
+}
+
+function styleDiv(element) {
+  element.style.position = 'absolute';
+  element.style.top = 0;
+  element.style.left = 0;
+  element.style.display = 'block';
+  element.style.transformOrigin = '0 0';
+  element.style.webkitTransformOrigin = '0 0';
+  element.style.backfaceVisibility = 'visible';
+  element.style.webkitBackfaceVisibility = 'visible';
+  element.style.transformStyle = 'preserve-3d';
+  element.style.webkitTransformStyle = 'preserve-3d';
+  element.style.mozTransformStyle = 'preserve-3d';
+}
+
+function BMEnterFrameEvent(type, currentTime, totalTime, frameMultiplier) {
+  this.type = type;
+  this.currentTime = currentTime;
+  this.totalTime = totalTime;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMCompleteEvent(type, frameMultiplier) {
+  this.type = type;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMCompleteLoopEvent(type, totalLoops, currentLoop, frameMultiplier) {
+  this.type = type;
+  this.currentLoop = currentLoop;
+  this.totalLoops = totalLoops;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMSegmentStartEvent(type, firstFrame, totalFrames) {
+  this.type = type;
+  this.firstFrame = firstFrame;
+  this.totalFrames = totalFrames;
+}
+
+function BMDestroyEvent(type, target) {
+  this.type = type;
+  this.target = target;
+}
+
+function BMRenderFrameErrorEvent(nativeError, currentTime) {
+  this.type = 'renderFrameError';
+  this.nativeError = nativeError;
+  this.currentTime = currentTime;
+}
+
+function BMConfigErrorEvent(nativeError) {
+  this.type = 'configError';
+  this.nativeError = nativeError;
+}
+
+function BMAnimationConfigErrorEvent(type, nativeError) {
+  this.type = type;
+  this.nativeError = nativeError;
+}
+
+const createElementID = (function () {
+  var _count = 0;
+  return function createID() {
+    _count += 1;
+    return idPrefix + '__lottie_element_' + _count;
+  };
+}());
+
+function HSVtoRGB(h, s, v) {
+  var r;
+  var g;
+  var b;
+  var i;
+  var f;
+  var p;
+  var q;
+  var t;
+  i = Math.floor(h * 6);
+  f = h * 6 - i;
+  p = v * (1 - s);
+  q = v * (1 - f * s);
+  t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    case 5: r = v; g = p; b = q; break;
+    default: break;
+  }
+  return [r,
+    g,
+    b];
+}
+
+function RGBtoHSV(r, g, b) {
+  var max = Math.max(r, g, b);
+  var min = Math.min(r, g, b);
+  var d = max - min;
+  var h;
+  var s = (max === 0 ? 0 : d / max);
+  var v = max / 255;
+
+  switch (max) {
+    case min: h = 0; break;
+    case r: h = (g - b) + d * (g < b ? 6 : 0); h /= 6 * d; break;
+    case g: h = (b - r) + d * 2; h /= 6 * d; break;
+    case b: h = (r - g) + d * 4; h /= 6 * d; break;
+    default: break;
+  }
+
+  return [
+    h,
+    s,
+    v,
+  ];
+}
+
+function addSaturationToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[1] += offset;
+  if (hsv[1] > 1) {
+    hsv[1] = 1;
+  } else if (hsv[1] <= 0) {
+    hsv[1] = 0;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+function addBrightnessToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[2] += offset;
+  if (hsv[2] > 1) {
+    hsv[2] = 1;
+  } else if (hsv[2] < 0) {
+    hsv[2] = 0;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+function addHueToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[0] += offset / 360;
+  if (hsv[0] > 1) {
+    hsv[0] -= 1;
+  } else if (hsv[0] < 0) {
+    hsv[0] += 1;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+const rgbToHex = (function () {
+  var colorMap = [];
+  var i;
+  var hex;
+  for (i = 0; i < 256; i += 1) {
+    hex = i.toString(16);
+    colorMap[i] = hex.length === 1 ? '0' + hex : hex;
+  }
+
+  return function (r, g, b) {
+    if (r < 0) {
+      r = 0;
+    }
+    if (g < 0) {
+      g = 0;
+    }
+    if (b < 0) {
+      b = 0;
+    }
+    return '#' + colorMap[r] + colorMap[g] + colorMap[b];
+  };
+}());
+
+const setSubframeEnabled = (flag) => { subframeEnabled = !!flag; };
+const getSubframeEnabled = () => subframeEnabled;
+const setExpressionsPlugin = (value) => { expressionsPlugin = value; };
+const getExpressionsPlugin = () => expressionsPlugin;
+const setExpressionInterfaces = (value) => { expressionsInterfaces = value; };
+const getExpressionInterfaces = () => expressionsInterfaces;
+const setDefaultCurveSegments = (value) => { defaultCurveSegments = value; };
+const getDefaultCurveSegments = () => defaultCurveSegments;
+const setIdPrefix = (value) => { idPrefix = value; };
+const getIdPrefix = () => idPrefix;
+
+export {
+  setSubframeEnabled,
+  getSubframeEnabled,
+  setExpressionsPlugin,
+  getExpressionsPlugin,
+  setExpressionInterfaces,
+  getExpressionInterfaces,
+  setDefaultCurveSegments,
+  getDefaultCurveSegments,
+  isSafari,
+  bmPow,
+  bmSqrt,
+  bmFloor,
+  bmMax,
+  bmMin,
+  degToRads,
+  roundCorner,
+  styleDiv,
+  bmRnd,
+  roundValues,
+  BMEnterFrameEvent,
+  BMCompleteEvent,
+  BMCompleteLoopEvent,
+  BMSegmentStartEvent,
+  BMDestroyEvent,
+  BMRenderFrameErrorEvent,
+  BMConfigErrorEvent,
+  BMAnimationConfigErrorEvent,
+  createElementID,
+  addSaturationToRGB,
+  addBrightnessToRGB,
+  addHueToRGB,
+  rgbToHex,
+  setIdPrefix,
+  getIdPrefix,
+  BMMath,
+  ProjectInterface,
+};
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘Ù‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.js‘Úäimport {
+  createSizedArray,
+} from './helpers/arrays';
+
+let subframeEnabled = true;
+let expressionsPlugin = null;
+let expressionsInterfaces = null;
+let idPrefix = '';
+const isSafari = false;
+let _shouldRoundValues = false;
+const bmPow = Math.pow;
+const bmSqrt = Math.sqrt;
+const bmFloor = Math.floor;
+const bmMax = Math.max;
+const bmMin = Math.min;
+
+const BMMath = {};
+(function () {
+  var propertyNames = ['abs', 'acos', 'acosh', 'asin', 'asinh', 'atan', 'atanh', 'atan2', 'ceil', 'cbrt', 'expm1', 'clz32', 'cos', 'cosh', 'exp', 'floor', 'fround', 'hypot', 'imul', 'log', 'log1p', 'log2', 'log10', 'max', 'min', 'pow', 'random', 'round', 'sign', 'sin', 'sinh', 'sqrt', 'tan', 'tanh', 'trunc', 'E', 'LN10', 'LN2', 'LOG10E', 'LOG2E', 'PI', 'SQRT1_2', 'SQRT2'];
+  var i;
+  var len = propertyNames.length;
+  for (i = 0; i < len; i += 1) {
+    BMMath[propertyNames[i]] = Math[propertyNames[i]];
+  }
+}());
+
+function ProjectInterface() { return {}; }
+BMMath.random = Math.random;
+BMMath.abs = function (val) {
+  var tOfVal = typeof val;
+  if (tOfVal === 'object' && val.length) {
+    var absArr = createSizedArray(val.length);
+    var i;
+    var len = val.length;
+    for (i = 0; i < len; i += 1) {
+      absArr[i] = Math.abs(val[i]);
+    }
+    return absArr;
+  }
+  return Math.abs(val);
+};
+let defaultCurveSegments = 150;
+const degToRads = Math.PI / 180;
+const roundCorner = 0.5519;
+
+function roundValues(flag) {
+  _shouldRoundValues = !!flag;
+}
+
+function bmRnd(value) {
+  if (_shouldRoundValues) {
+    return Math.round(value);
+  }
+  return value;
+}
+
+function styleDiv(element) {
+  element.style.position = 'absolute';
+  element.style.top = 0;
+  element.style.left = 0;
+  element.style.display = 'block';
+  element.style.transformOrigin = '0 0';
+  element.style.webkitTransformOrigin = '0 0';
+  element.style.backfaceVisibility = 'visible';
+  element.style.webkitBackfaceVisibility = 'visible';
+  element.style.transformStyle = 'preserve-3d';
+  element.style.webkitTransformStyle = 'preserve-3d';
+  element.style.mozTransformStyle = 'preserve-3d';
+}
+
+function BMEnterFrameEvent(type, currentTime, totalTime, frameMultiplier) {
+  this.type = type;
+  this.currentTime = currentTime;
+  this.totalTime = totalTime;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMCompleteEvent(type, frameMultiplier) {
+  this.type = type;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMCompleteLoopEvent(type, totalLoops, currentLoop, frameMultiplier) {
+  this.type = type;
+  this.currentLoop = currentLoop;
+  this.totalLoops = totalLoops;
+  this.direction = frameMultiplier < 0 ? -1 : 1;
+}
+
+function BMSegmentStartEvent(type, firstFrame, totalFrames) {
+  this.type = type;
+  this.firstFrame = firstFrame;
+  this.totalFrames = totalFrames;
+}
+
+function BMDestroyEvent(type, target) {
+  this.type = type;
+  this.target = target;
+}
+
+function BMRenderFrameErrorEvent(nativeError, currentTime) {
+  this.type = 'renderFrameError';
+  this.nativeError = nativeError;
+  this.currentTime = currentTime;
+}
+
+function BMConfigErrorEvent(nativeError) {
+  this.type = 'configError';
+  this.nativeError = nativeError;
+}
+
+function BMAnimationConfigErrorEvent(type, nativeError) {
+  this.type = type;
+  this.nativeError = nativeError;
+}
+
+const createElementID = (function () {
+  var _count = 0;
+  return function createID() {
+    _count += 1;
+    return idPrefix + '__lottie_element_' + _count;
+  };
+}());
+
+function HSVtoRGB(h, s, v) {
+  var r;
+  var g;
+  var b;
+  var i;
+  var f;
+  var p;
+  var q;
+  var t;
+  i = Math.floor(h * 6);
+  f = h * 6 - i;
+  p = v * (1 - s);
+  q = v * (1 - f * s);
+  t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    case 5: r = v; g = p; b = q; break;
+    default: break;
+  }
+  return [r,
+    g,
+    b];
+}
+
+function RGBtoHSV(r, g, b) {
+  var max = Math.max(r, g, b);
+  var min = Math.min(r, g, b);
+  var d = max - min;
+  var h;
+  var s = (max === 0 ? 0 : d / max);
+  var v = max / 255;
+
+  switch (max) {
+    case min: h = 0; break;
+    case r: h = (g - b) + d * (g < b ? 6 : 0); h /= 6 * d; break;
+    case g: h = (b - r) + d * 2; h /= 6 * d; break;
+    case b: h = (r - g) + d * 4; h /= 6 * d; break;
+    default: break;
+  }
+
+  return [
+    h,
+    s,
+    v,
+  ];
+}
+
+function addSaturationToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[1] += offset;
+  if (hsv[1] > 1) {
+    hsv[1] = 1;
+  } else if (hsv[1] <= 0) {
+    hsv[1] = 0;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+function addBrightnessToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[2] += offset;
+  if (hsv[2] > 1) {
+    hsv[2] = 1;
+  } else if (hsv[2] < 0) {
+    hsv[2] = 0;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+function addHueToRGB(color, offset) {
+  var hsv = RGBtoHSV(color[0] * 255, color[1] * 255, color[2] * 255);
+  hsv[0] += offset / 360;
+  if (hsv[0] > 1) {
+    hsv[0] -= 1;
+  } else if (hsv[0] < 0) {
+    hsv[0] += 1;
+  }
+  return HSVtoRGB(hsv[0], hsv[1], hsv[2]);
+}
+
+const rgbToHex = (function () {
+  var colorMap = [];
+  var i;
+  var hex;
+  for (i = 0; i < 256; i += 1) {
+    hex = i.toString(16);
+    colorMap[i] = hex.length === 1 ? '0' + hex : hex;
+  }
+
+  return function (r, g, b) {
+    if (r < 0) {
+      r = 0;
+    }
+    if (g < 0) {
+      g = 0;
+    }
+    if (b < 0) {
+      b = 0;
+    }
+    return '#' + colorMap[r] + colorMap[g] + colorMap[b];
+  };
+}());
+
+const setSubframeEnabled = (flag) => { subframeEnabled = !!flag; };
+const getSubframeEnabled = () => subframeEnabled;
+const setExpressionsPlugin = (value) => { expressionsPlugin = value; };
+const getExpressionsPlugin = () => expressionsPlugin;
+const setExpressionInterfaces = (value) => { expressionsInterfaces = value; };
+const getExpressionInterfaces = () => expressionsInterfaces;
+const setDefaultCurveSegments = (value) => { defaultCurveSegments = value; };
+const getDefaultCurveSegments = () => defaultCurveSegments;
+const setIdPrefix = (value) => { idPrefix = value; };
+const getIdPrefix = () => idPrefix;
+
+export {
+  setSubframeEnabled,
+  getSubframeEnabled,
+  setExpressionsPlugin,
+  getExpressionsPlugin,
+  setExpressionInterfaces,
+  getExpressionInterfaces,
+  setDefaultCurveSegments,
+  getDefaultCurveSegments,
+  isSafari,
+  bmPow,
+  bmSqrt,
+  bmFloor,
+  bmMax,
+  bmMin,
+  degToRads,
+  roundCorner,
+  styleDiv,
+  bmRnd,
+  roundValues,
+  BMEnterFrameEvent,
+  BMCompleteEvent,
+  BMCompleteLoopEvent,
+  BMSegmentStartEvent,
+  BMDestroyEvent,
+  BMRenderFrameErrorEvent,
+  BMConfigErrorEvent,
+  BMAnimationConfigErrorEvent,
+  createElementID,
+  addSaturationToRGB,
+  addBrightnessToRGB,
+  addHueToRGB,
+  rgbToHex,
+  setIdPrefix,
+  getIdPrefix,
+  BMMath,
+  ProjectInterface,
+};
+ÔrF‘°./helpers/arraysÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\arrays.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache‘ÔrJ–¤type¥start£end«declarationªspecifiers¦source¶ExportNamedDeclarationÍ ÍâÀÜ $ÔrK•¤type¥start£end¥local¨exported¯ExportSpecifierÍ,Í>ÔrL”¤type¥start£end¤nameªIdentifierÍ,Í>²setSubframeEnabledLªIdentifierÍ,Í>²setSubframeEnabledK¯ExportSpecifierÍCÍULªIdentifierÍCÍU²getSubframeEnabledLªIdentifierÍCÍU²getSubframeEnabledK¯ExportSpecifierÍZÍnLªIdentifierÍZÍn´setExpressionsPluginLªIdentifierÍZÍn´setExpressionsPluginK¯ExportSpecifierÍsÍ‡LªIdentifierÍsÍ‡´getExpressionsPluginLªIdentifierÍsÍ‡´getExpressionsPluginK¯ExportSpecifierÍŒÍ£LªIdentifierÍŒÍ£·setExpressionInterfacesLªIdentifierÍŒÍ£·setExpressionInterfacesK¯ExportSpecifierÍ¨Í¿LªIdentifierÍ¨Í¿·getExpressionInterfacesLªIdentifierÍ¨Í¿·getExpressionInterfacesK¯ExportSpecifierÍÄÍÛLªIdentifierÍÄÍÛ·setDefaultCurveSegmentsLªIdentifierÍÄÍÛ·setDefaultCurveSegmentsK¯ExportSpecifierÍàÍ÷LªIdentifierÍàÍ÷·getDefaultCurveSegmentsLªIdentifierÍàÍ÷·getDefaultCurveSegmentsK¯ExportSpecifierÍüÍLªIdentifierÍüÍ¨isSafariLªIdentifierÍüÍ¨isSafariK¯ExportSpecifierÍ	ÍLªIdentifierÍ	Í¥bmPowLªIdentifierÍ	Í¥bmPowK¯ExportSpecifierÍÍLªIdentifierÍÍ¦bmSqrtLªIdentifierÍÍ¦bmSqrtK¯ExportSpecifierÍÍ%LªIdentifierÍÍ%§bmFloorLªIdentifierÍÍ%§bmFloorK¯ExportSpecifierÍ*Í/LªIdentifierÍ*Í/¥bmMaxLªIdentifierÍ*Í/¥bmMaxK¯ExportSpecifierÍ4Í9LªIdentifierÍ4Í9¥bmMinLªIdentifierÍ4Í9¥bmMinK¯ExportSpecifierÍ>ÍGLªIdentifierÍ>ÍG©degToRadsLªIdentifierÍ>ÍG©degToRadsK¯ExportSpecifierÍLÍWLªIdentifierÍLÍW«roundCornerLªIdentifierÍLÍW«roundCornerK¯ExportSpecifierÍ\ÍdLªIdentifierÍ\Íd¨styleDivLªIdentifierÍ\Íd¨styleDivK¯ExportSpecifierÍiÍnLªIdentifierÍiÍn¥bmRndLªIdentifierÍiÍn¥bmRndK¯ExportSpecifierÍsÍ~LªIdentifierÍsÍ~«roundValuesLªIdentifierÍsÍ~«roundValuesK¯ExportSpecifierÍƒÍ”LªIdentifierÍƒÍ”±BMEnterFrameEventLªIdentifierÍƒÍ”±BMEnterFrameEventK¯ExportSpecifierÍ™Í¨LªIdentifierÍ™Í¨¯BMCompleteEventLªIdentifierÍ™Í¨¯BMCompleteEventK¯ExportSpecifierÍ­ÍÀLªIdentifierÍ­ÍÀ³BMCompleteLoopEventLªIdentifierÍ­ÍÀ³BMCompleteLoopEventK¯ExportSpecifierÍÅÍØLªIdentifierÍÅÍØ³BMSegmentStartEventLªIdentifierÍÅÍØ³BMSegmentStartEventK¯ExportSpecifierÍİÍëLªIdentifierÍİÍë®BMDestroyEventLªIdentifierÍİÍë®BMDestroyEventK¯ExportSpecifierÍğÍLªIdentifierÍğÍ·BMRenderFrameErrorEventLªIdentifierÍğÍ·BMRenderFrameErrorEventK¯ExportSpecifierÍÍLªIdentifierÍÍ²BMConfigErrorEventLªIdentifierÍÍ²BMConfigErrorEventK¯ExportSpecifierÍ#Í>LªIdentifierÍ#Í>»BMAnimationConfigErrorEventLªIdentifierÍ#Í>»BMAnimationConfigErrorEventK¯ExportSpecifierÍCÍRLªIdentifierÍCÍR¯createElementIDLªIdentifierÍCÍR¯createElementIDK¯ExportSpecifierÍWÍiLªIdentifierÍWÍi²addSaturationToRGBLªIdentifierÍWÍi²addSaturationToRGBK¯ExportSpecifierÍnÍ€LªIdentifierÍnÍ€²addBrightnessToRGBLªIdentifierÍnÍ€²addBrightnessToRGBK¯ExportSpecifierÍ…ÍLªIdentifierÍ…Í«addHueToRGBLªIdentifierÍ…Í«addHueToRGBK¯ExportSpecifierÍ•ÍLªIdentifierÍ•Í¨rgbToHexLªIdentifierÍ•Í¨rgbToHexK¯ExportSpecifierÍ¢Í­LªIdentifierÍ¢Í­«setIdPrefixLªIdentifierÍ¢Í­«setIdPrefixK¯ExportSpecifierÍ²Í½LªIdentifierÍ²Í½«getIdPrefixLªIdentifierÍ²Í½«getIdPrefixK¯ExportSpecifierÍÂÍÈLªIdentifierÍÂÍÈ¦BMMathLªIdentifierÍÂÍÈ¦BMMathK¯ExportSpecifierÍÍÍİLªIdentifierÍÍÍİ°ProjectInterfaceLªIdentifierÍÍÍİ°ProjectInterfaceÀ‘ÔrM•¤type¥start£endªspecifiers¦source±ImportDeclaration 9‘ÔrN•¤type¥start£end¨imported¥local¯ImportSpecifierLªIdentifier°createSizedArrayLªIdentifier°createSizedArrayÔrO•¤type¥start£end¥value£raw§Literal&8°./helpers/arrays²'./helpers/arrays'

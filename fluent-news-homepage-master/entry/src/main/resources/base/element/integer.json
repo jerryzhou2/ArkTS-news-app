@@ -125,6 +125,22 @@
       "value": 10
     },
     {
+      "name": "news_detail_title_font_size",
+      "value": 24
+    },
+    {
+      "name": "news_detail_image_height",
+      "value": 200
+    },
+    {
+      "name": "nav_bar_height",
+      "value": 50
+    },
+    {
+      "name": "nav_button_font_size",
+      "value": 16
+    },
+    {
       "name": "news_list_border_radius",
       "value": 16
     },
@@ -143,6 +159,18 @@
     {
       "name": "back_top_margin",
       "value": 12
+    },
+    {
+      "name": "action_button_size",
+      "value": 24
+    },
+    {
+      "name": "action_row_height",
+      "value": 60
+    },
+    {
+      "name": "action_text_font_size",
+      "value": 14
     }
   ]
 }

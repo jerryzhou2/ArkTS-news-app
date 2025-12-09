@@ -1,0 +1,659 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚã/**
+ * MIT License
+ *
+ * Copyright (C) 2024 Huawei Device Co., Ltd.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+import {
+  decompressAndReadJson,
+  readJson,
+  handleAssets,
+  handleZipAssets,
+  isCacheExist,
+  combineArrayBuffers,
+  createImageFilesDir,
+  isJsonFile,
+  isCompressdFile,
+  isExistNetworkAssets
+} from './DataUtil';
+import http from '@ohos.net.http';
+import {LogUtil} from '../utils/LogUtil';
+import { writeFileSync, moveFileSync } from './FileUtil';
+
+const downloadManager = (function () {
+  const downloadUri = new Map();
+  const TIMEOUT = 60000;
+  /**
+   * åŠ è½½ç½‘ç»œåŠ¨ç”»èµ„æº
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   * @param onError - åŠ è½½å¤±è´¥æ—¶çš„å›è°ƒå‡½æ•°
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param cacheFlag - æ˜¯å¦ä½¿ç”¨ç¼“å­˜æ ‡å¿—
+   */
+  function loadNetworkAnimations(uri, onComplete, onError, resultDir, cacheFlag) {
+    let flag = downloadUri.has(uri);
+    if (flag) {
+      let tasks = setInterval(() => {
+        let existResult = isCacheExist(uri, resultDir.route);
+        if (!existResult?.isExist) {
+          return;
+        }
+        // å–æ¶ˆå¾ªç¯æ£€æµ‹
+        clearInterval(tasks);
+        let repeatData = readJson(uri, resultDir.route);
+        let newData = isJsonFile(uri) ? repeatData : handleZipAssets(repeatData, resultDir.route);
+        onComplete(newData, false);
+      }, 100);
+    } else {
+      // å°†URIæ·»åŠ åˆ°Mapä¸­ï¼Œè¡¨ç¤ºä¸‹è½½å·²ç»å¼€å§‹
+      downloadUri.set(uri, true);
+      let httpRequest = http.createHttp();
+      let fileData = [];
+      httpRequest.on('dataReceive', (data) => {
+        fileData.push(data);
+      });
+      let promise = httpRequest.requestInStream(uri, {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        connectTimeout: TIMEOUT,
+        readTimeout: TIMEOUT,
+      });
+
+      promise.then(async (data) => {
+        if (data === 200 || data === 206 || data === 204) {
+          let resBuf = combineArrayBuffers(fileData);
+          let filePath = `${getContext().cacheDir}/${resultDir.dataName}`;
+          writeFileSync(filePath, resBuf);
+          loadSuccess(uri, resultDir, onComplete);
+        } else {
+          loadFail(uri, resultDir, onComplete, onError, cacheFlag);
+        }
+      }).finally(()=>{
+        downloadUri.delete(uri);
+        httpRequest.off('dataReceive');
+        httpRequest.destroy();
+      });
+    }
+  };
+
+  /**
+   * æˆåŠŸåŠ è½½åŠ¨ç”»èµ„æºåçš„å¤„ç†é€»è¾‘
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   */
+  function loadSuccess(uri, resultDir, onComplete) {
+    if (isJsonFile(uri)) {
+      let srcPath = `${getContext()?.cacheDir}/${resultDir.dataName}`;
+      let destPath = `${resultDir.route}/${resultDir.dataName}`;
+      moveFileSync(srcPath, destPath);
+      let lottieData = readJson(uri, resultDir.route);
+      if (lottieData?.assets?.length && isExistNetworkAssets(lottieData?.assets)) {
+        downLoadImg(lottieData).then((results) => {
+          // ä¸‹è½½æˆåŠŸåŠ è½½ç½‘ç»œ
+          let newJsonData = handleAssets(lottieData);
+          onComplete(newJsonData, true);
+        })
+          .catch((err) => {
+            LogUtil.error(`Download error: ${JSON.stringify(err)}`);
+            errCallBack('error', err);
+            let filesJsonData = handleAssets(lottieData);
+            onComplete(filesJsonData, false);
+          });
+      } else {
+        // è¯»å–æˆåŠŸä»Mapä¸­ç§»é™¤æ¡ç›®
+        // uriæ–¹å¼æ— å›¾ç‰‡çš„jsonç½‘ç»œèµ„æº
+        downloadUri.delete(uri);
+        onComplete(lottieData, true);
+      }
+    } else if (isCompressdFile(uri)) {
+      decompressAndReadJson(uri, `${getContext()?.cacheDir}`, resultDir.route).then((result) => {
+        // è§£å‹æˆåŠŸï¼Œä»Mapä¸­ç§»é™¤æ¡ç›®
+        downloadUri.delete(uri);
+        onComplete(result, true);
+      }).catch((errData) => {
+        // è§£å‹å¤±è´¥ï¼Œä»Mapä¸­ç§»é™¤æ¡ç›®
+        downloadUri.delete(uri);
+        errCallBack('error', errData);
+      });
+    }
+  };
+
+  /**
+   * å¤„ç†åŠ¨ç”»èµ„æºåŠ è½½å¤±è´¥æ—¶çš„é€»è¾‘
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   * @param onError - é”™è¯¯å›è°ƒå‡½æ•°
+   * @param err - é”™è¯¯å¯¹è±¡
+   * @param cacheFlag - æ˜¯å¦ä½¿ç”¨ç¼“å­˜æ ‡å¿—
+   */
+  function loadFail(uri, resultDir, onComplete, onError, cacheFlag) {
+    // å¤„ç†ç½‘ç»œå¼‚å¸¸åŠ è½½ç¼“å­˜
+    let existResult = isCacheExist(uri, resultDir.route);
+    if (existResult?.isExist && cacheFlag) {
+      downloadUri.delete(uri);
+      let cacheData = readJson(uri, resultDir.route);
+      let newData = isJsonFile(uri) ? cacheData : handleZipAssets(cacheData, resultDir.route);
+      onComplete(newData, false);
+    } else {
+      // ç¼“å­˜æ— èµ„æºï¼Œç»™ç”¨æˆ·è¿”å›åŠ è½½å¼‚å¸¸
+      downloadUri.delete(uri);
+      onError('error', 'download fail');
+    }
+  };
+
+  /**
+   * ä¸‹è½½å¹¶ä¿å­˜ Lottie åŠ¨ç”»ä¸­çš„ç½‘ç»œå›¾ç‰‡èµ„æº
+   *
+   * @param lottieData - åŒ…å«åŠ¨ç”»å›¾ç‰‡èµ„æºçš„å¯¹è±¡
+   * @returns è¿”å›ä¸€ä¸ª Promiseï¼Œè¡¨ç¤ºæ‰€æœ‰ä¸‹è½½ä»»åŠ¡çš„çŠ¶æ€
+   */
+  function loadNetworkImages(lottieData) {
+    let imgRouterFilesDir = createImageFilesDir();
+    let downloadTasks = [];
+    let imgData = [];
+    lottieData?.assets?.forEach((item, index) => {
+      if (item.id && item.p && item.p.startsWith('http')) {
+        let httpRequest = http.createHttp();
+        let jsonData = [];
+        httpRequest.on('dataReceive', (data) => {
+          jsonData.push(data);
+          jsonData.length === 1 ? imgData.push({ AssetItem: item, fileData: jsonData }) : undefined;
+        });
+        let promise = httpRequest.requestInStream(item.p, {
+          method: http.RequestMethod.GET,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER,
+          connectTimeout: TIMEOUT,
+          readTimeout: TIMEOUT,
+        }).finally(() => {
+          httpRequest.off('dataReceive');
+          httpRequest.destroy();
+        });
+        downloadTasks.push(promise);
+      }
+    });
+
+    return Promise.all(downloadTasks)
+      .then((results) => {
+        results?.forEach((item, index) => {
+          let resBuf = combineArrayBuffers(imgData[index].fileData);
+          let filePath = `${imgRouterFilesDir}/${imgData[index].AssetItem.id}.png`;
+          writeFileSync(filePath, resBuf);
+        });
+        LogUtil.error(`All download tasks completed success: ${JSON.stringify(results)}`);
+      })
+      .catch((error) => {
+        if (error && error.message) {
+          LogUtil.error(`An error occurred during download: ${JSON.stringify(error)}`);
+        }
+      });
+  };
+
+  return {
+    loadNetworkAnimation:loadNetworkAnimations,
+    loadNetworkImage:loadNetworkImages,
+  };
+}());
+
+export default downloadManager;Â”Ù“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsÙS hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.net.http.d.tsÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\FileUtil.jsÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DownloadManager.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚã/**
+ * MIT License
+ *
+ * Copyright (C) 2024 Huawei Device Co., Ltd.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+import {
+  decompressAndReadJson,
+  readJson,
+  handleAssets,
+  handleZipAssets,
+  isCacheExist,
+  combineArrayBuffers,
+  createImageFilesDir,
+  isJsonFile,
+  isCompressdFile,
+  isExistNetworkAssets
+} from './DataUtil';
+import http from '@ohos.net.http';
+import {LogUtil} from '../utils/LogUtil';
+import { writeFileSync, moveFileSync } from './FileUtil';
+
+const downloadManager = (function () {
+  const downloadUri = new Map();
+  const TIMEOUT = 60000;
+  /**
+   * åŠ è½½ç½‘ç»œåŠ¨ç”»èµ„æº
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   * @param onError - åŠ è½½å¤±è´¥æ—¶çš„å›è°ƒå‡½æ•°
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param cacheFlag - æ˜¯å¦ä½¿ç”¨ç¼“å­˜æ ‡å¿—
+   */
+  function loadNetworkAnimations(uri, onComplete, onError, resultDir, cacheFlag) {
+    let flag = downloadUri.has(uri);
+    if (flag) {
+      let tasks = setInterval(() => {
+        let existResult = isCacheExist(uri, resultDir.route);
+        if (!existResult?.isExist) {
+          return;
+        }
+        // å–æ¶ˆå¾ªç¯æ£€æµ‹
+        clearInterval(tasks);
+        let repeatData = readJson(uri, resultDir.route);
+        let newData = isJsonFile(uri) ? repeatData : handleZipAssets(repeatData, resultDir.route);
+        onComplete(newData, false);
+      }, 100);
+    } else {
+      // å°†URIæ·»åŠ åˆ°Mapä¸­ï¼Œè¡¨ç¤ºä¸‹è½½å·²ç»å¼€å§‹
+      downloadUri.set(uri, true);
+      let httpRequest = http.createHttp();
+      let fileData = [];
+      httpRequest.on('dataReceive', (data) => {
+        fileData.push(data);
+      });
+      let promise = httpRequest.requestInStream(uri, {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        connectTimeout: TIMEOUT,
+        readTimeout: TIMEOUT,
+      });
+
+      promise.then(async (data) => {
+        if (data === 200 || data === 206 || data === 204) {
+          let resBuf = combineArrayBuffers(fileData);
+          let filePath = `${getContext().cacheDir}/${resultDir.dataName}`;
+          writeFileSync(filePath, resBuf);
+          loadSuccess(uri, resultDir, onComplete);
+        } else {
+          loadFail(uri, resultDir, onComplete, onError, cacheFlag);
+        }
+      }).finally(()=>{
+        downloadUri.delete(uri);
+        httpRequest.off('dataReceive');
+        httpRequest.destroy();
+      });
+    }
+  };
+
+  /**
+   * æˆåŠŸåŠ è½½åŠ¨ç”»èµ„æºåçš„å¤„ç†é€»è¾‘
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   */
+  function loadSuccess(uri, resultDir, onComplete) {
+    if (isJsonFile(uri)) {
+      let srcPath = `${getContext()?.cacheDir}/${resultDir.dataName}`;
+      let destPath = `${resultDir.route}/${resultDir.dataName}`;
+      moveFileSync(srcPath, destPath);
+      let lottieData = readJson(uri, resultDir.route);
+      if (lottieData?.assets?.length && isExistNetworkAssets(lottieData?.assets)) {
+        downLoadImg(lottieData).then((results) => {
+          // ä¸‹è½½æˆåŠŸåŠ è½½ç½‘ç»œ
+          let newJsonData = handleAssets(lottieData);
+          onComplete(newJsonData, true);
+        })
+          .catch((err) => {
+            LogUtil.error(`Download error: ${JSON.stringify(err)}`);
+            errCallBack('error', err);
+            let filesJsonData = handleAssets(lottieData);
+            onComplete(filesJsonData, false);
+          });
+      } else {
+        // è¯»å–æˆåŠŸä»Mapä¸­ç§»é™¤æ¡ç›®
+        // uriæ–¹å¼æ— å›¾ç‰‡çš„jsonç½‘ç»œèµ„æº
+        downloadUri.delete(uri);
+        onComplete(lottieData, true);
+      }
+    } else if (isCompressdFile(uri)) {
+      decompressAndReadJson(uri, `${getContext()?.cacheDir}`, resultDir.route).then((result) => {
+        // è§£å‹æˆåŠŸï¼Œä»Mapä¸­ç§»é™¤æ¡ç›®
+        downloadUri.delete(uri);
+        onComplete(result, true);
+      }).catch((errData) => {
+        // è§£å‹å¤±è´¥ï¼Œä»Mapä¸­ç§»é™¤æ¡ç›®
+        downloadUri.delete(uri);
+        errCallBack('error', errData);
+      });
+    }
+  };
+
+  /**
+   * å¤„ç†åŠ¨ç”»èµ„æºåŠ è½½å¤±è´¥æ—¶çš„é€»è¾‘
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   * @param onError - é”™è¯¯å›è°ƒå‡½æ•°
+   * @param err - é”™è¯¯å¯¹è±¡
+   * @param cacheFlag - æ˜¯å¦ä½¿ç”¨ç¼“å­˜æ ‡å¿—
+   */
+  function loadFail(uri, resultDir, onComplete, onError, cacheFlag) {
+    // å¤„ç†ç½‘ç»œå¼‚å¸¸åŠ è½½ç¼“å­˜
+    let existResult = isCacheExist(uri, resultDir.route);
+    if (existResult?.isExist && cacheFlag) {
+      downloadUri.delete(uri);
+      let cacheData = readJson(uri, resultDir.route);
+      let newData = isJsonFile(uri) ? cacheData : handleZipAssets(cacheData, resultDir.route);
+      onComplete(newData, false);
+    } else {
+      // ç¼“å­˜æ— èµ„æºï¼Œç»™ç”¨æˆ·è¿”å›åŠ è½½å¼‚å¸¸
+      downloadUri.delete(uri);
+      onError('error', 'download fail');
+    }
+  };
+
+  /**
+   * ä¸‹è½½å¹¶ä¿å­˜ Lottie åŠ¨ç”»ä¸­çš„ç½‘ç»œå›¾ç‰‡èµ„æº
+   *
+   * @param lottieData - åŒ…å«åŠ¨ç”»å›¾ç‰‡èµ„æºçš„å¯¹è±¡
+   * @returns è¿”å›ä¸€ä¸ª Promiseï¼Œè¡¨ç¤ºæ‰€æœ‰ä¸‹è½½ä»»åŠ¡çš„çŠ¶æ€
+   */
+  function loadNetworkImages(lottieData) {
+    let imgRouterFilesDir = createImageFilesDir();
+    let downloadTasks = [];
+    let imgData = [];
+    lottieData?.assets?.forEach((item, index) => {
+      if (item.id && item.p && item.p.startsWith('http')) {
+        let httpRequest = http.createHttp();
+        let jsonData = [];
+        httpRequest.on('dataReceive', (data) => {
+          jsonData.push(data);
+          jsonData.length === 1 ? imgData.push({ AssetItem: item, fileData: jsonData }) : undefined;
+        });
+        let promise = httpRequest.requestInStream(item.p, {
+          method: http.RequestMethod.GET,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER,
+          connectTimeout: TIMEOUT,
+          readTimeout: TIMEOUT,
+        }).finally(() => {
+          httpRequest.off('dataReceive');
+          httpRequest.destroy();
+        });
+        downloadTasks.push(promise);
+      }
+    });
+
+    return Promise.all(downloadTasks)
+      .then((results) => {
+        results?.forEach((item, index) => {
+          let resBuf = combineArrayBuffers(imgData[index].fileData);
+          let filePath = `${imgRouterFilesDir}/${imgData[index].AssetItem.id}.png`;
+          writeFileSync(filePath, resBuf);
+        });
+        LogUtil.error(`All download tasks completed success: ${JSON.stringify(results)}`);
+      })
+      .catch((error) => {
+        if (error && error.message) {
+          LogUtil.error(`An error occurred during download: ${JSON.stringify(error)}`);
+        }
+      });
+  };
+
+  return {
+    loadNetworkAnimation:loadNetworkAnimations,
+    loadNetworkImage:loadNetworkImages,
+  };
+}());
+
+export default downloadManager;ÔrE•§version¨mappings¥names§sources®sourcesContentÜ Ü‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘ÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DownloadManager.js‘Úã/**
+ * MIT License
+ *
+ * Copyright (C) 2024 Huawei Device Co., Ltd.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+import {
+  decompressAndReadJson,
+  readJson,
+  handleAssets,
+  handleZipAssets,
+  isCacheExist,
+  combineArrayBuffers,
+  createImageFilesDir,
+  isJsonFile,
+  isCompressdFile,
+  isExistNetworkAssets
+} from './DataUtil';
+import http from '@ohos.net.http';
+import {LogUtil} from '../utils/LogUtil';
+import { writeFileSync, moveFileSync } from './FileUtil';
+
+const downloadManager = (function () {
+  const downloadUri = new Map();
+  const TIMEOUT = 60000;
+  /**
+   * åŠ è½½ç½‘ç»œåŠ¨ç”»èµ„æº
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   * @param onError - åŠ è½½å¤±è´¥æ—¶çš„å›è°ƒå‡½æ•°
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param cacheFlag - æ˜¯å¦ä½¿ç”¨ç¼“å­˜æ ‡å¿—
+   */
+  function loadNetworkAnimations(uri, onComplete, onError, resultDir, cacheFlag) {
+    let flag = downloadUri.has(uri);
+    if (flag) {
+      let tasks = setInterval(() => {
+        let existResult = isCacheExist(uri, resultDir.route);
+        if (!existResult?.isExist) {
+          return;
+        }
+        // å–æ¶ˆå¾ªç¯æ£€æµ‹
+        clearInterval(tasks);
+        let repeatData = readJson(uri, resultDir.route);
+        let newData = isJsonFile(uri) ? repeatData : handleZipAssets(repeatData, resultDir.route);
+        onComplete(newData, false);
+      }, 100);
+    } else {
+      // å°†URIæ·»åŠ åˆ°Mapä¸­ï¼Œè¡¨ç¤ºä¸‹è½½å·²ç»å¼€å§‹
+      downloadUri.set(uri, true);
+      let httpRequest = http.createHttp();
+      let fileData = [];
+      httpRequest.on('dataReceive', (data) => {
+        fileData.push(data);
+      });
+      let promise = httpRequest.requestInStream(uri, {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        connectTimeout: TIMEOUT,
+        readTimeout: TIMEOUT,
+      });
+
+      promise.then(async (data) => {
+        if (data === 200 || data === 206 || data === 204) {
+          let resBuf = combineArrayBuffers(fileData);
+          let filePath = `${getContext().cacheDir}/${resultDir.dataName}`;
+          writeFileSync(filePath, resBuf);
+          loadSuccess(uri, resultDir, onComplete);
+        } else {
+          loadFail(uri, resultDir, onComplete, onError, cacheFlag);
+        }
+      }).finally(()=>{
+        downloadUri.delete(uri);
+        httpRequest.off('dataReceive');
+        httpRequest.destroy();
+      });
+    }
+  };
+
+  /**
+   * æˆåŠŸåŠ è½½åŠ¨ç”»èµ„æºåçš„å¤„ç†é€»è¾‘
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   */
+  function loadSuccess(uri, resultDir, onComplete) {
+    if (isJsonFile(uri)) {
+      let srcPath = `${getContext()?.cacheDir}/${resultDir.dataName}`;
+      let destPath = `${resultDir.route}/${resultDir.dataName}`;
+      moveFileSync(srcPath, destPath);
+      let lottieData = readJson(uri, resultDir.route);
+      if (lottieData?.assets?.length && isExistNetworkAssets(lottieData?.assets)) {
+        downLoadImg(lottieData).then((results) => {
+          // ä¸‹è½½æˆåŠŸåŠ è½½ç½‘ç»œ
+          let newJsonData = handleAssets(lottieData);
+          onComplete(newJsonData, true);
+        })
+          .catch((err) => {
+            LogUtil.error(`Download error: ${JSON.stringify(err)}`);
+            errCallBack('error', err);
+            let filesJsonData = handleAssets(lottieData);
+            onComplete(filesJsonData, false);
+          });
+      } else {
+        // è¯»å–æˆåŠŸä»Mapä¸­ç§»é™¤æ¡ç›®
+        // uriæ–¹å¼æ— å›¾ç‰‡çš„jsonç½‘ç»œèµ„æº
+        downloadUri.delete(uri);
+        onComplete(lottieData, true);
+      }
+    } else if (isCompressdFile(uri)) {
+      decompressAndReadJson(uri, `${getContext()?.cacheDir}`, resultDir.route).then((result) => {
+        // è§£å‹æˆåŠŸï¼Œä»Mapä¸­ç§»é™¤æ¡ç›®
+        downloadUri.delete(uri);
+        onComplete(result, true);
+      }).catch((errData) => {
+        // è§£å‹å¤±è´¥ï¼Œä»Mapä¸­ç§»é™¤æ¡ç›®
+        downloadUri.delete(uri);
+        errCallBack('error', errData);
+      });
+    }
+  };
+
+  /**
+   * å¤„ç†åŠ¨ç”»èµ„æºåŠ è½½å¤±è´¥æ—¶çš„é€»è¾‘
+   *
+   * @param uri - åŠ¨ç”»èµ„æºçš„ç½‘ç»œåœ°å€
+   * @param resultDir - ç»“æœç›®å½•ä¿¡æ¯
+   * @param onComplete - åŠ è½½å®Œæˆæ—¶çš„å›è°ƒå‡½æ•°
+   * @param onError - é”™è¯¯å›è°ƒå‡½æ•°
+   * @param err - é”™è¯¯å¯¹è±¡
+   * @param cacheFlag - æ˜¯å¦ä½¿ç”¨ç¼“å­˜æ ‡å¿—
+   */
+  function loadFail(uri, resultDir, onComplete, onError, cacheFlag) {
+    // å¤„ç†ç½‘ç»œå¼‚å¸¸åŠ è½½ç¼“å­˜
+    let existResult = isCacheExist(uri, resultDir.route);
+    if (existResult?.isExist && cacheFlag) {
+      downloadUri.delete(uri);
+      let cacheData = readJson(uri, resultDir.route);
+      let newData = isJsonFile(uri) ? cacheData : handleZipAssets(cacheData, resultDir.route);
+      onComplete(newData, false);
+    } else {
+      // ç¼“å­˜æ— èµ„æºï¼Œç»™ç”¨æˆ·è¿”å›åŠ è½½å¼‚å¸¸
+      downloadUri.delete(uri);
+      onError('error', 'download fail');
+    }
+  };
+
+  /**
+   * ä¸‹è½½å¹¶ä¿å­˜ Lottie åŠ¨ç”»ä¸­çš„ç½‘ç»œå›¾ç‰‡èµ„æº
+   *
+   * @param lottieData - åŒ…å«åŠ¨ç”»å›¾ç‰‡èµ„æºçš„å¯¹è±¡
+   * @returns è¿”å›ä¸€ä¸ª Promiseï¼Œè¡¨ç¤ºæ‰€æœ‰ä¸‹è½½ä»»åŠ¡çš„çŠ¶æ€
+   */
+  function loadNetworkImages(lottieData) {
+    let imgRouterFilesDir = createImageFilesDir();
+    let downloadTasks = [];
+    let imgData = [];
+    lottieData?.assets?.forEach((item, index) => {
+      if (item.id && item.p && item.p.startsWith('http')) {
+        let httpRequest = http.createHttp();
+        let jsonData = [];
+        httpRequest.on('dataReceive', (data) => {
+          jsonData.push(data);
+          jsonData.length === 1 ? imgData.push({ AssetItem: item, fileData: jsonData }) : undefined;
+        });
+        let promise = httpRequest.requestInStream(item.p, {
+          method: http.RequestMethod.GET,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER,
+          connectTimeout: TIMEOUT,
+          readTimeout: TIMEOUT,
+        }).finally(() => {
+          httpRequest.off('dataReceive');
+          httpRequest.destroy();
+        });
+        downloadTasks.push(promise);
+      }
+    });
+
+    return Promise.all(downloadTasks)
+      .then((results) => {
+        results?.forEach((item, index) => {
+          let resBuf = combineArrayBuffers(imgData[index].fileData);
+          let filePath = `${imgRouterFilesDir}/${imgData[index].AssetItem.id}.png`;
+          writeFileSync(filePath, resBuf);
+        });
+        LogUtil.error(`All download tasks completed success: ${JSON.stringify(results)}`);
+      })
+      .catch((error) => {
+        if (error && error.message) {
+          LogUtil.error(`An error occurred during download: ${JSON.stringify(error)}`);
+        }
+      });
+  };
+
+  return {
+    loadNetworkAnimation:loadNetworkAnimations,
+    loadNetworkImage:loadNetworkImages,
+  };
+}());
+
+export default downloadManager;ÔrF”®@ohos.net.httpª./DataUtil°../utils/LogUtilª./FileUtilÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÃÙS hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.net.http.d.tsAÃªoh-resolveÂGAÂÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsAÃªoh-resolveÂGAÂÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsAÃªoh-resolveÂGAÂÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\FileUtil.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache”ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclarationÍ’ÍxšÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÍÍ³ÔrL”¤type¥start£end¤nameªIdentifierÍÍ³µdecompressAndReadJsonLªIdentifierÍÍ³µdecompressAndReadJsonK¯ImportSpecifierÍ¸ÍÀLªIdentifierÍ¸ÍÀ¨readJsonLªIdentifierÍ¸ÍÀ¨readJsonK¯ImportSpecifierÍÅÍÑLªIdentifierÍÅÍÑ¬handleAssetsLªIdentifierÍÅÍÑ¬handleAssetsK¯ImportSpecifierÍÖÍåLªIdentifierÍÖÍå¯handleZipAssetsLªIdentifierÍÖÍå¯handleZipAssetsK¯ImportSpecifierÍêÍöLªIdentifierÍêÍö¬isCacheExistLªIdentifierÍêÍö¬isCacheExistK¯ImportSpecifierÍûÍLªIdentifierÍûÍ³combineArrayBuffersLªIdentifierÍûÍ³combineArrayBuffersK¯ImportSpecifierÍÍ&LªIdentifierÍÍ&³createImageFilesDirLªIdentifierÍÍ&³createImageFilesDirK¯ImportSpecifierÍ+Í5LªIdentifierÍ+Í5ªisJsonFileLªIdentifierÍ+Í5ªisJsonFileK¯ImportSpecifierÍ:ÍILªIdentifierÍ:ÍI¯isCompressdFileLªIdentifierÍ:ÍI¯isCompressdFileK¯ImportSpecifierÍNÍbLªIdentifierÍNÍb´isExistNetworkAssetsLªIdentifierÍNÍb´isExistNetworkAssetsÔrM•¤type¥start£end¥value£raw§LiteralÍkÍwª./DataUtil¬'./DataUtil'J±ImportDeclarationÍzÍœ‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifierÍÍ…LªIdentifierÍÍ…¤httpM§LiteralÍ‹Í›®@ohos.net.http°'@ohos.net.http'J±ImportDeclarationÍÍÇ‘K¯ImportSpecifierÍ¦Í­LªIdentifierÍ¦Í­§LogUtilLªIdentifierÍ¦Í­§LogUtilM§LiteralÍ´ÍÆ°../utils/LogUtil²'../utils/LogUtil'J±ImportDeclarationÍÉÍ’K¯ImportSpecifierÍÒÍßLªIdentifierÍÒÍß­writeFileSyncLªIdentifierÍÒÍß­writeFileSyncK¯ImportSpecifierÍáÍíLªIdentifierÍáÍí¬moveFileSyncLªIdentifierÍáÍí¬moveFileSyncM§LiteralÍõÍª./FileUtil¬'./FileUtil'
