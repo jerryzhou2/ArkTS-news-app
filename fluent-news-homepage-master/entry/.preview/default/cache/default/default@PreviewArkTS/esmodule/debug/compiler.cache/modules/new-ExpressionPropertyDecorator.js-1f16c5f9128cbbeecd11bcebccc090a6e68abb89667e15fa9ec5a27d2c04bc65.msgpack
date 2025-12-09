@@ -1,0 +1,1392 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚD‡import {
+  extendPrototype,
+} from '../functionExtensions';
+import {
+  createSizedArray,
+  createTypedArray,
+} from '../helpers/arrays';
+import ShapePropertyFactory from '../shapes/ShapeProperty';
+import PropertyFactory from '../PropertyFactory';
+import shapePool from '../pooling/shape_pool';
+import {
+  initialDefaultFrame,
+} from '../../main';
+import bez from '../bez';
+import Matrix from '../../3rd_party/transformation-matrix';
+import TransformPropertyFactory from '../TransformProperty';
+import expressionHelpers from './expressionHelpers';
+import ExpressionManager from './ExpressionManager';
+
+function addPropertyDecorator() {
+  function loopOut(type, duration, durationFlag) {
+    if (!this.k || !this.keyframes) {
+      return this.pv;
+    }
+    type = type ? type.toLowerCase() : '';
+    var currentFrame = this.comp.renderedFrame;
+    var keyframes = this.keyframes;
+    var lastKeyFrame = keyframes[keyframes.length - 1].t;
+    if (currentFrame <= lastKeyFrame) {
+      return this.pv;
+    }
+    var cycleDuration;
+    var firstKeyFrame;
+    if (!durationFlag) {
+      if (!duration || duration > keyframes.length - 1) {
+        duration = keyframes.length - 1;
+      }
+      firstKeyFrame = keyframes[keyframes.length - 1 - duration].t;
+      cycleDuration = lastKeyFrame - firstKeyFrame;
+    } else {
+      if (!duration) {
+        cycleDuration = Math.max(0, lastKeyFrame - this.elem.data.ip);
+      } else {
+        cycleDuration = Math.abs(lastKeyFrame - this.elem.comp.globalData.frameRate * duration);
+      }
+      firstKeyFrame = lastKeyFrame - cycleDuration;
+    }
+    var i;
+    var len;
+    var ret;
+    if (type === 'pingpong') {
+      var iterations = Math.floor((currentFrame - firstKeyFrame) / cycleDuration);
+      if (iterations % 2 !== 0) {
+          return this.getValueAtTime(((cycleDuration - (currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      }
+    } else if (type === 'offset') {
+      var initV = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var endV = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+        var current = this.getValueAtTime(((currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      var repeats = Math.floor((currentFrame - firstKeyFrame) / cycleDuration);
+      if (this.pv.length) {
+        ret = new Array(initV.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = (endV[i] - initV[i]) * repeats + current[i];
+        }
+        return ret;
+      }
+      return (endV - initV) * repeats + current;
+    } else if (type === 'continue') {
+      var lastValue = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+      var nextLastValue = this.getValueAtTime((lastKeyFrame - 0.001) / this.comp.globalData.frameRate, 0);
+      if (this.pv.length) {
+        ret = new Array(lastValue.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+            ret[i] = lastValue[i] + (lastValue[i] - nextLastValue[i]) * ((currentFrame - lastKeyFrame) / this.comp.globalData.frameRate) / 0.0005; // eslint-disable-line
+        }
+        return ret;
+      }
+      return lastValue + (lastValue - nextLastValue) * (((currentFrame - lastKeyFrame)) / 0.001);
+    }
+      return this.getValueAtTime((((currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+
+  }
+
+  function loopIn(type, duration, durationFlag) {
+    if (!this.k) {
+      return this.pv;
+    }
+    type = type ? type.toLowerCase() : '';
+    var currentFrame = this.comp.renderedFrame;
+    var keyframes = this.keyframes;
+    var firstKeyFrame = keyframes[0].t;
+    if (currentFrame >= firstKeyFrame) {
+      return this.pv;
+    }
+    var cycleDuration;
+    var lastKeyFrame;
+    if (!durationFlag) {
+      if (!duration || duration > keyframes.length - 1) {
+        duration = keyframes.length - 1;
+      }
+      lastKeyFrame = keyframes[duration].t;
+      cycleDuration = lastKeyFrame - firstKeyFrame;
+    } else {
+      if (!duration) {
+        cycleDuration = Math.max(0, this.elem.data.op - firstKeyFrame);
+      } else {
+        cycleDuration = Math.abs(this.elem.comp.globalData.frameRate * duration);
+      }
+      lastKeyFrame = firstKeyFrame + cycleDuration;
+    }
+    var i;
+    var len;
+    var ret;
+    if (type === 'pingpong') {
+      var iterations = Math.floor((firstKeyFrame - currentFrame) / cycleDuration);
+      if (iterations % 2 === 0) {
+          return this.getValueAtTime((((firstKeyFrame - currentFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      }
+    } else if (type === 'offset') {
+      var initV = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var endV = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+      var current = this.getValueAtTime((cycleDuration - ((firstKeyFrame - currentFrame) % cycleDuration) + firstKeyFrame) / this.comp.globalData.frameRate, 0);
+      var repeats = Math.floor((firstKeyFrame - currentFrame) / cycleDuration) + 1;
+      if (this.pv.length) {
+        ret = new Array(initV.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = current[i] - (endV[i] - initV[i]) * repeats;
+        }
+        return ret;
+      }
+      return current - (endV - initV) * repeats;
+    } else if (type === 'continue') {
+      var firstValue = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var nextFirstValue = this.getValueAtTime((firstKeyFrame + 0.001) / this.comp.globalData.frameRate, 0);
+      if (this.pv.length) {
+        ret = new Array(firstValue.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = firstValue[i] + ((firstValue[i] - nextFirstValue[i]) * (firstKeyFrame - currentFrame)) / 0.001;
+        }
+        return ret;
+      }
+      return firstValue + ((firstValue - nextFirstValue) * (firstKeyFrame - currentFrame)) / 0.001;
+    }
+      return this.getValueAtTime(((cycleDuration - ((firstKeyFrame - currentFrame) % cycleDuration + firstKeyFrame))) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+
+  }
+
+  function smooth(width, samples) {
+    if (!this.k) {
+      return this.pv;
+    }
+    width = (width || 0.4) * 0.5;
+    samples = Math.floor(samples || 5);
+    if (samples <= 1) {
+      return this.pv;
+    }
+    var currentTime = this.comp.renderedFrame / this.comp.globalData.frameRate;
+    var initFrame = currentTime - width;
+    var endFrame = currentTime + width;
+    var sampleFrequency = samples > 1 ? (endFrame - initFrame) / (samples - 1) : 1;
+    var i = 0;
+    var j = 0;
+    var value;
+    if (this.pv.length) {
+      value = createTypedArray('float32', this.pv.length);
+    } else {
+      value = 0;
+    }
+    var sampleValue;
+    while (i < samples) {
+      sampleValue = this.getValueAtTime(initFrame + i * sampleFrequency);
+      if (this.pv.length) {
+        for (j = 0; j < this.pv.length; j += 1) {
+          value[j] += sampleValue[j];
+        }
+      } else {
+        value += sampleValue;
+      }
+      i += 1;
+    }
+    if (this.pv.length) {
+      for (j = 0; j < this.pv.length; j += 1) {
+        value[j] /= samples;
+      }
+    } else {
+      value /= samples;
+    }
+    return value;
+  }
+
+  function getTransformValueAtTime(time) {
+    if (!this._transformCachingAtTime) {
+      this._transformCachingAtTime = {
+        v: new Matrix(),
+      };
+    }
+    /// /
+    var matrix = this._transformCachingAtTime.v;
+    matrix.cloneFromProps(this.pre.props);
+    if (this.appliedTransformations < 1) {
+      var anchor = this.a.getValueAtTime(time);
+      matrix.translate(
+        -anchor[0] * this.a.mult,
+        -anchor[1] * this.a.mult,
+        anchor[2] * this.a.mult
+      );
+    }
+    if (this.appliedTransformations < 2) {
+      var scale = this.s.getValueAtTime(time);
+      matrix.scale(
+        scale[0] * this.s.mult,
+        scale[1] * this.s.mult,
+        scale[2] * this.s.mult
+      );
+    }
+    if (this.sk && this.appliedTransformations < 3) {
+      var skew = this.sk.getValueAtTime(time);
+      var skewAxis = this.sa.getValueAtTime(time);
+      matrix.skewFromAxis(-skew * this.sk.mult, skewAxis * this.sa.mult);
+    }
+    if (this.r && this.appliedTransformations < 4) {
+      var rotation = this.r.getValueAtTime(time);
+      matrix.rotate(-rotation * this.r.mult);
+    } else if (!this.r && this.appliedTransformations < 4) {
+      var rotationZ = this.rz.getValueAtTime(time);
+      var rotationY = this.ry.getValueAtTime(time);
+      var rotationX = this.rx.getValueAtTime(time);
+      var orientation = this.or.getValueAtTime(time);
+      matrix.rotateZ(-rotationZ * this.rz.mult)
+        .rotateY(rotationY * this.ry.mult)
+        .rotateX(rotationX * this.rx.mult)
+        .rotateZ(-orientation[2] * this.or.mult)
+        .rotateY(orientation[1] * this.or.mult)
+        .rotateX(orientation[0] * this.or.mult);
+    }
+    if (this.data.p && this.data.p.s) {
+      var positionX = this.px.getValueAtTime(time);
+      var positionY = this.py.getValueAtTime(time);
+      if (this.data.p.z) {
+        var positionZ = this.pz.getValueAtTime(time);
+        matrix.translate(
+          positionX * this.px.mult,
+          positionY * this.py.mult,
+          -positionZ * this.pz.mult
+        );
+      } else {
+        matrix.translate(positionX * this.px.mult, positionY * this.py.mult, 0);
+      }
+    } else {
+      var position = this.p.getValueAtTime(time);
+      matrix.translate(
+        position[0] * this.p.mult,
+        position[1] * this.p.mult,
+        -position[2] * this.p.mult
+      );
+    }
+    return matrix;
+    /// /
+  }
+
+  function getTransformStaticValueAtTime() {
+    return this.v.clone(new Matrix());
+  }
+
+  var getTransformProperty = TransformPropertyFactory.getTransformProperty;
+  TransformPropertyFactory.getTransformProperty = function (elem, data, container) {
+    var prop = getTransformProperty(elem, data, container);
+    if (prop.dynamicProperties.length) {
+      prop.getValueAtTime = getTransformValueAtTime.bind(prop);
+    } else {
+      prop.getValueAtTime = getTransformStaticValueAtTime.bind(prop);
+    }
+    prop.setGroupProperty = expressionHelpers.setGroupProperty;
+    return prop;
+  };
+
+  var propertyGetProp = PropertyFactory.getProp;
+  PropertyFactory.getProp = function (elem, data, type, mult, container) {
+    var prop = propertyGetProp(elem, data, type, mult, container);
+    // prop.getVelocityAtTime = getVelocityAtTime;
+    // prop.loopOut = loopOut;
+    // prop.loopIn = loopIn;
+    if (prop.kf) {
+      prop.getValueAtTime = expressionHelpers.getValueAtTime.bind(prop);
+    } else {
+      prop.getValueAtTime = expressionHelpers.getStaticValueAtTime.bind(prop);
+    }
+    prop.setGroupProperty = expressionHelpers.setGroupProperty;
+    prop.loopOut = loopOut;
+    prop.loopIn = loopIn;
+    prop.smooth = smooth;
+    prop.getVelocityAtTime = expressionHelpers.getVelocityAtTime.bind(prop);
+    prop.getSpeedAtTime = expressionHelpers.getSpeedAtTime.bind(prop);
+    prop.numKeys = data.a === 1 ? data.k.length : 0;
+    prop.propertyIndex = data.ix;
+    var value = 0;
+    if (type !== 0) {
+      value = createTypedArray('float32', data.a === 1 ? data.k[0].s.length : data.k.length);
+    }
+    prop._cachingAtTime = {
+      lastFrame: initialDefaultFrame,
+      lastIndex: 0,
+      value: value,
+    };
+    expressionHelpers.searchExpressions(elem, data, prop);
+    if (prop.k) {
+      container.addDynamicProperty(prop);
+    }
+
+    return prop;
+  };
+
+  function getShapeValueAtTime(frameNum) {
+    // For now this caching object is created only when needed instead of creating it when the shape is initialized.
+    if (!this._cachingAtTime) {
+      this._cachingAtTime = {
+        shapeValue: shapePool.clone(this.pv),
+        lastIndex: 0,
+        lastTime: initialDefaultFrame,
+      };
+    }
+
+    frameNum *= this.elem.globalData.frameRate;
+    frameNum -= this.offsetTime;
+    if (frameNum !== this._cachingAtTime.lastTime) {
+      this._cachingAtTime.lastIndex = this._cachingAtTime.lastTime < frameNum ? this._caching.lastIndex : 0;
+      this._cachingAtTime.lastTime = frameNum;
+      this.interpolateShape(frameNum, this._cachingAtTime.shapeValue, this._cachingAtTime);
+    }
+    return this._cachingAtTime.shapeValue;
+  }
+
+  var ShapePropertyConstructorFunction = ShapePropertyFactory.getConstructorFunction();
+  var KeyframedShapePropertyConstructorFunction = ShapePropertyFactory.getKeyframedConstructorFunction();
+
+  function ShapeExpressions() {}
+  ShapeExpressions.prototype = {
+    vertices: function (prop, time) {
+      if (this.k) {
+        this.getValue();
+      }
+      var shapePath = this.v;
+      if (time !== undefined) {
+        shapePath = this.getValueAtTime(time, 0);
+      }
+      var i;
+      var len = shapePath._length;
+      var vertices = shapePath[prop];
+      var points = shapePath.v;
+      var arr = createSizedArray(len);
+      for (i = 0; i < len; i += 1) {
+        if (prop === 'i' || prop === 'o') {
+          arr[i] = [vertices[i][0] - points[i][0], vertices[i][1] - points[i][1]];
+        } else {
+          arr[i] = [vertices[i][0], vertices[i][1]];
+        }
+      }
+      return arr;
+    },
+    points: function (time) {
+      return this.vertices('v', time);
+    },
+    inTangents: function (time) {
+      return this.vertices('i', time);
+    },
+    outTangents: function (time) {
+      return this.vertices('o', time);
+    },
+    isClosed: function () {
+      return this.v.c;
+    },
+    pointOnPath: function (perc, time) {
+      var shapePath = this.v;
+      if (time !== undefined) {
+        shapePath = this.getValueAtTime(time, 0);
+      }
+      if (!this._segmentsLength) {
+        this._segmentsLength = bez.getSegmentsLength(shapePath);
+      }
+
+      var segmentsLength = this._segmentsLength;
+      var lengths = segmentsLength.lengths;
+      var lengthPos = segmentsLength.totalLength * perc;
+      var i = 0;
+      var len = lengths.length;
+      var accumulatedLength = 0;
+      var pt;
+      while (i < len) {
+        if (accumulatedLength + lengths[i].addedLength > lengthPos) {
+          var initIndex = i;
+          var endIndex = (shapePath.c && i === len - 1) ? 0 : i + 1;
+          var segmentPerc = (lengthPos - accumulatedLength) / lengths[i].addedLength;
+          pt = bez.getPointInSegment(shapePath.v[initIndex], shapePath.v[endIndex], shapePath.o[initIndex], shapePath.i[endIndex], segmentPerc, lengths[i]);
+          break;
+        } else {
+          accumulatedLength += lengths[i].addedLength;
+        }
+        i += 1;
+      }
+      if (!pt) {
+        pt = shapePath.c ? [shapePath.v[0][0], shapePath.v[0][1]] : [shapePath.v[shapePath._length - 1][0], shapePath.v[shapePath._length - 1][1]];
+      }
+      return pt;
+    },
+    vectorOnPath: function (perc, time, vectorType) {
+      // perc doesn't use triple equality because it can be a Number object as well as a primitive.
+      if (perc == 1) { // eslint-disable-line eqeqeq
+        perc = this.v.c;
+      } else if (perc == 0) { // eslint-disable-line eqeqeq
+        perc = 0.999;
+      }
+      var pt1 = this.pointOnPath(perc, time);
+      var pt2 = this.pointOnPath(perc + 0.001, time);
+      var xLength = pt2[0] - pt1[0];
+      var yLength = pt2[1] - pt1[1];
+      var magnitude = Math.sqrt(Math.pow(xLength, 2) + Math.pow(yLength, 2));
+      if (magnitude === 0) {
+        return [0, 0];
+      }
+      var unitVector = vectorType === 'tangent' ? [xLength / magnitude, yLength / magnitude] : [-yLength / magnitude, xLength / magnitude];
+      return unitVector;
+    },
+    tangentOnPath: function (perc, time) {
+      return this.vectorOnPath(perc, time, 'tangent');
+    },
+    normalOnPath: function (perc, time) {
+      return this.vectorOnPath(perc, time, 'normal');
+    },
+    setGroupProperty: expressionHelpers.setGroupProperty,
+    getValueAtTime: expressionHelpers.getStaticValueAtTime,
+  };
+  extendPrototype([ShapeExpressions], ShapePropertyConstructorFunction);
+  extendPrototype([ShapeExpressions], KeyframedShapePropertyConstructorFunction);
+  KeyframedShapePropertyConstructorFunction.prototype.getValueAtTime = getShapeValueAtTime;
+  KeyframedShapePropertyConstructorFunction.prototype.initiateExpression = ExpressionManager.initiateExpression;
+
+  var propertyGetShapeProp = ShapePropertyFactory.getShapeProp;
+  ShapePropertyFactory.getShapeProp = function (elem, data, type, arr, trims) {
+    var prop = propertyGetShapeProp(elem, data, type, arr, trims);
+    prop.propertyIndex = data.ix;
+    prop.lock = false;
+    if (type === 3) {
+      expressionHelpers.searchExpressions(elem, data.pt, prop);
+    } else if (type === 4) {
+      expressionHelpers.searchExpressions(elem, data.ks, prop);
+    }
+    if (prop.k) {
+      elem.addDynamicProperty(prop);
+    }
+    return prop;
+  };
+}
+
+function initialize() {
+  addPropertyDecorator();
+}
+
+export default initialize;
+Â›ÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\arrays.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeProperty.jsÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\PropertyFactory.jsÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\pooling\shape_pool.jsÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\bez.jsÙ¤D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\3rd_party\transformation-matrix.jsÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\TransformProperty.jsÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\expressionHelpers.jsÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionManager.jsÙ²D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionPropertyDecorator.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚD‡import {
+  extendPrototype,
+} from '../functionExtensions';
+import {
+  createSizedArray,
+  createTypedArray,
+} from '../helpers/arrays';
+import ShapePropertyFactory from '../shapes/ShapeProperty';
+import PropertyFactory from '../PropertyFactory';
+import shapePool from '../pooling/shape_pool';
+import {
+  initialDefaultFrame,
+} from '../../main';
+import bez from '../bez';
+import Matrix from '../../3rd_party/transformation-matrix';
+import TransformPropertyFactory from '../TransformProperty';
+import expressionHelpers from './expressionHelpers';
+import ExpressionManager from './ExpressionManager';
+
+function addPropertyDecorator() {
+  function loopOut(type, duration, durationFlag) {
+    if (!this.k || !this.keyframes) {
+      return this.pv;
+    }
+    type = type ? type.toLowerCase() : '';
+    var currentFrame = this.comp.renderedFrame;
+    var keyframes = this.keyframes;
+    var lastKeyFrame = keyframes[keyframes.length - 1].t;
+    if (currentFrame <= lastKeyFrame) {
+      return this.pv;
+    }
+    var cycleDuration;
+    var firstKeyFrame;
+    if (!durationFlag) {
+      if (!duration || duration > keyframes.length - 1) {
+        duration = keyframes.length - 1;
+      }
+      firstKeyFrame = keyframes[keyframes.length - 1 - duration].t;
+      cycleDuration = lastKeyFrame - firstKeyFrame;
+    } else {
+      if (!duration) {
+        cycleDuration = Math.max(0, lastKeyFrame - this.elem.data.ip);
+      } else {
+        cycleDuration = Math.abs(lastKeyFrame - this.elem.comp.globalData.frameRate * duration);
+      }
+      firstKeyFrame = lastKeyFrame - cycleDuration;
+    }
+    var i;
+    var len;
+    var ret;
+    if (type === 'pingpong') {
+      var iterations = Math.floor((currentFrame - firstKeyFrame) / cycleDuration);
+      if (iterations % 2 !== 0) {
+          return this.getValueAtTime(((cycleDuration - (currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      }
+    } else if (type === 'offset') {
+      var initV = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var endV = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+        var current = this.getValueAtTime(((currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      var repeats = Math.floor((currentFrame - firstKeyFrame) / cycleDuration);
+      if (this.pv.length) {
+        ret = new Array(initV.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = (endV[i] - initV[i]) * repeats + current[i];
+        }
+        return ret;
+      }
+      return (endV - initV) * repeats + current;
+    } else if (type === 'continue') {
+      var lastValue = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+      var nextLastValue = this.getValueAtTime((lastKeyFrame - 0.001) / this.comp.globalData.frameRate, 0);
+      if (this.pv.length) {
+        ret = new Array(lastValue.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+            ret[i] = lastValue[i] + (lastValue[i] - nextLastValue[i]) * ((currentFrame - lastKeyFrame) / this.comp.globalData.frameRate) / 0.0005; // eslint-disable-line
+        }
+        return ret;
+      }
+      return lastValue + (lastValue - nextLastValue) * (((currentFrame - lastKeyFrame)) / 0.001);
+    }
+      return this.getValueAtTime((((currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+
+  }
+
+  function loopIn(type, duration, durationFlag) {
+    if (!this.k) {
+      return this.pv;
+    }
+    type = type ? type.toLowerCase() : '';
+    var currentFrame = this.comp.renderedFrame;
+    var keyframes = this.keyframes;
+    var firstKeyFrame = keyframes[0].t;
+    if (currentFrame >= firstKeyFrame) {
+      return this.pv;
+    }
+    var cycleDuration;
+    var lastKeyFrame;
+    if (!durationFlag) {
+      if (!duration || duration > keyframes.length - 1) {
+        duration = keyframes.length - 1;
+      }
+      lastKeyFrame = keyframes[duration].t;
+      cycleDuration = lastKeyFrame - firstKeyFrame;
+    } else {
+      if (!duration) {
+        cycleDuration = Math.max(0, this.elem.data.op - firstKeyFrame);
+      } else {
+        cycleDuration = Math.abs(this.elem.comp.globalData.frameRate * duration);
+      }
+      lastKeyFrame = firstKeyFrame + cycleDuration;
+    }
+    var i;
+    var len;
+    var ret;
+    if (type === 'pingpong') {
+      var iterations = Math.floor((firstKeyFrame - currentFrame) / cycleDuration);
+      if (iterations % 2 === 0) {
+          return this.getValueAtTime((((firstKeyFrame - currentFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      }
+    } else if (type === 'offset') {
+      var initV = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var endV = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+      var current = this.getValueAtTime((cycleDuration - ((firstKeyFrame - currentFrame) % cycleDuration) + firstKeyFrame) / this.comp.globalData.frameRate, 0);
+      var repeats = Math.floor((firstKeyFrame - currentFrame) / cycleDuration) + 1;
+      if (this.pv.length) {
+        ret = new Array(initV.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = current[i] - (endV[i] - initV[i]) * repeats;
+        }
+        return ret;
+      }
+      return current - (endV - initV) * repeats;
+    } else if (type === 'continue') {
+      var firstValue = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var nextFirstValue = this.getValueAtTime((firstKeyFrame + 0.001) / this.comp.globalData.frameRate, 0);
+      if (this.pv.length) {
+        ret = new Array(firstValue.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = firstValue[i] + ((firstValue[i] - nextFirstValue[i]) * (firstKeyFrame - currentFrame)) / 0.001;
+        }
+        return ret;
+      }
+      return firstValue + ((firstValue - nextFirstValue) * (firstKeyFrame - currentFrame)) / 0.001;
+    }
+      return this.getValueAtTime(((cycleDuration - ((firstKeyFrame - currentFrame) % cycleDuration + firstKeyFrame))) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+
+  }
+
+  function smooth(width, samples) {
+    if (!this.k) {
+      return this.pv;
+    }
+    width = (width || 0.4) * 0.5;
+    samples = Math.floor(samples || 5);
+    if (samples <= 1) {
+      return this.pv;
+    }
+    var currentTime = this.comp.renderedFrame / this.comp.globalData.frameRate;
+    var initFrame = currentTime - width;
+    var endFrame = currentTime + width;
+    var sampleFrequency = samples > 1 ? (endFrame - initFrame) / (samples - 1) : 1;
+    var i = 0;
+    var j = 0;
+    var value;
+    if (this.pv.length) {
+      value = createTypedArray('float32', this.pv.length);
+    } else {
+      value = 0;
+    }
+    var sampleValue;
+    while (i < samples) {
+      sampleValue = this.getValueAtTime(initFrame + i * sampleFrequency);
+      if (this.pv.length) {
+        for (j = 0; j < this.pv.length; j += 1) {
+          value[j] += sampleValue[j];
+        }
+      } else {
+        value += sampleValue;
+      }
+      i += 1;
+    }
+    if (this.pv.length) {
+      for (j = 0; j < this.pv.length; j += 1) {
+        value[j] /= samples;
+      }
+    } else {
+      value /= samples;
+    }
+    return value;
+  }
+
+  function getTransformValueAtTime(time) {
+    if (!this._transformCachingAtTime) {
+      this._transformCachingAtTime = {
+        v: new Matrix(),
+      };
+    }
+    /// /
+    var matrix = this._transformCachingAtTime.v;
+    matrix.cloneFromProps(this.pre.props);
+    if (this.appliedTransformations < 1) {
+      var anchor = this.a.getValueAtTime(time);
+      matrix.translate(
+        -anchor[0] * this.a.mult,
+        -anchor[1] * this.a.mult,
+        anchor[2] * this.a.mult
+      );
+    }
+    if (this.appliedTransformations < 2) {
+      var scale = this.s.getValueAtTime(time);
+      matrix.scale(
+        scale[0] * this.s.mult,
+        scale[1] * this.s.mult,
+        scale[2] * this.s.mult
+      );
+    }
+    if (this.sk && this.appliedTransformations < 3) {
+      var skew = this.sk.getValueAtTime(time);
+      var skewAxis = this.sa.getValueAtTime(time);
+      matrix.skewFromAxis(-skew * this.sk.mult, skewAxis * this.sa.mult);
+    }
+    if (this.r && this.appliedTransformations < 4) {
+      var rotation = this.r.getValueAtTime(time);
+      matrix.rotate(-rotation * this.r.mult);
+    } else if (!this.r && this.appliedTransformations < 4) {
+      var rotationZ = this.rz.getValueAtTime(time);
+      var rotationY = this.ry.getValueAtTime(time);
+      var rotationX = this.rx.getValueAtTime(time);
+      var orientation = this.or.getValueAtTime(time);
+      matrix.rotateZ(-rotationZ * this.rz.mult)
+        .rotateY(rotationY * this.ry.mult)
+        .rotateX(rotationX * this.rx.mult)
+        .rotateZ(-orientation[2] * this.or.mult)
+        .rotateY(orientation[1] * this.or.mult)
+        .rotateX(orientation[0] * this.or.mult);
+    }
+    if (this.data.p && this.data.p.s) {
+      var positionX = this.px.getValueAtTime(time);
+      var positionY = this.py.getValueAtTime(time);
+      if (this.data.p.z) {
+        var positionZ = this.pz.getValueAtTime(time);
+        matrix.translate(
+          positionX * this.px.mult,
+          positionY * this.py.mult,
+          -positionZ * this.pz.mult
+        );
+      } else {
+        matrix.translate(positionX * this.px.mult, positionY * this.py.mult, 0);
+      }
+    } else {
+      var position = this.p.getValueAtTime(time);
+      matrix.translate(
+        position[0] * this.p.mult,
+        position[1] * this.p.mult,
+        -position[2] * this.p.mult
+      );
+    }
+    return matrix;
+    /// /
+  }
+
+  function getTransformStaticValueAtTime() {
+    return this.v.clone(new Matrix());
+  }
+
+  var getTransformProperty = TransformPropertyFactory.getTransformProperty;
+  TransformPropertyFactory.getTransformProperty = function (elem, data, container) {
+    var prop = getTransformProperty(elem, data, container);
+    if (prop.dynamicProperties.length) {
+      prop.getValueAtTime = getTransformValueAtTime.bind(prop);
+    } else {
+      prop.getValueAtTime = getTransformStaticValueAtTime.bind(prop);
+    }
+    prop.setGroupProperty = expressionHelpers.setGroupProperty;
+    return prop;
+  };
+
+  var propertyGetProp = PropertyFactory.getProp;
+  PropertyFactory.getProp = function (elem, data, type, mult, container) {
+    var prop = propertyGetProp(elem, data, type, mult, container);
+    // prop.getVelocityAtTime = getVelocityAtTime;
+    // prop.loopOut = loopOut;
+    // prop.loopIn = loopIn;
+    if (prop.kf) {
+      prop.getValueAtTime = expressionHelpers.getValueAtTime.bind(prop);
+    } else {
+      prop.getValueAtTime = expressionHelpers.getStaticValueAtTime.bind(prop);
+    }
+    prop.setGroupProperty = expressionHelpers.setGroupProperty;
+    prop.loopOut = loopOut;
+    prop.loopIn = loopIn;
+    prop.smooth = smooth;
+    prop.getVelocityAtTime = expressionHelpers.getVelocityAtTime.bind(prop);
+    prop.getSpeedAtTime = expressionHelpers.getSpeedAtTime.bind(prop);
+    prop.numKeys = data.a === 1 ? data.k.length : 0;
+    prop.propertyIndex = data.ix;
+    var value = 0;
+    if (type !== 0) {
+      value = createTypedArray('float32', data.a === 1 ? data.k[0].s.length : data.k.length);
+    }
+    prop._cachingAtTime = {
+      lastFrame: initialDefaultFrame,
+      lastIndex: 0,
+      value: value,
+    };
+    expressionHelpers.searchExpressions(elem, data, prop);
+    if (prop.k) {
+      container.addDynamicProperty(prop);
+    }
+
+    return prop;
+  };
+
+  function getShapeValueAtTime(frameNum) {
+    // For now this caching object is created only when needed instead of creating it when the shape is initialized.
+    if (!this._cachingAtTime) {
+      this._cachingAtTime = {
+        shapeValue: shapePool.clone(this.pv),
+        lastIndex: 0,
+        lastTime: initialDefaultFrame,
+      };
+    }
+
+    frameNum *= this.elem.globalData.frameRate;
+    frameNum -= this.offsetTime;
+    if (frameNum !== this._cachingAtTime.lastTime) {
+      this._cachingAtTime.lastIndex = this._cachingAtTime.lastTime < frameNum ? this._caching.lastIndex : 0;
+      this._cachingAtTime.lastTime = frameNum;
+      this.interpolateShape(frameNum, this._cachingAtTime.shapeValue, this._cachingAtTime);
+    }
+    return this._cachingAtTime.shapeValue;
+  }
+
+  var ShapePropertyConstructorFunction = ShapePropertyFactory.getConstructorFunction();
+  var KeyframedShapePropertyConstructorFunction = ShapePropertyFactory.getKeyframedConstructorFunction();
+
+  function ShapeExpressions() {}
+  ShapeExpressions.prototype = {
+    vertices: function (prop, time) {
+      if (this.k) {
+        this.getValue();
+      }
+      var shapePath = this.v;
+      if (time !== undefined) {
+        shapePath = this.getValueAtTime(time, 0);
+      }
+      var i;
+      var len = shapePath._length;
+      var vertices = shapePath[prop];
+      var points = shapePath.v;
+      var arr = createSizedArray(len);
+      for (i = 0; i < len; i += 1) {
+        if (prop === 'i' || prop === 'o') {
+          arr[i] = [vertices[i][0] - points[i][0], vertices[i][1] - points[i][1]];
+        } else {
+          arr[i] = [vertices[i][0], vertices[i][1]];
+        }
+      }
+      return arr;
+    },
+    points: function (time) {
+      return this.vertices('v', time);
+    },
+    inTangents: function (time) {
+      return this.vertices('i', time);
+    },
+    outTangents: function (time) {
+      return this.vertices('o', time);
+    },
+    isClosed: function () {
+      return this.v.c;
+    },
+    pointOnPath: function (perc, time) {
+      var shapePath = this.v;
+      if (time !== undefined) {
+        shapePath = this.getValueAtTime(time, 0);
+      }
+      if (!this._segmentsLength) {
+        this._segmentsLength = bez.getSegmentsLength(shapePath);
+      }
+
+      var segmentsLength = this._segmentsLength;
+      var lengths = segmentsLength.lengths;
+      var lengthPos = segmentsLength.totalLength * perc;
+      var i = 0;
+      var len = lengths.length;
+      var accumulatedLength = 0;
+      var pt;
+      while (i < len) {
+        if (accumulatedLength + lengths[i].addedLength > lengthPos) {
+          var initIndex = i;
+          var endIndex = (shapePath.c && i === len - 1) ? 0 : i + 1;
+          var segmentPerc = (lengthPos - accumulatedLength) / lengths[i].addedLength;
+          pt = bez.getPointInSegment(shapePath.v[initIndex], shapePath.v[endIndex], shapePath.o[initIndex], shapePath.i[endIndex], segmentPerc, lengths[i]);
+          break;
+        } else {
+          accumulatedLength += lengths[i].addedLength;
+        }
+        i += 1;
+      }
+      if (!pt) {
+        pt = shapePath.c ? [shapePath.v[0][0], shapePath.v[0][1]] : [shapePath.v[shapePath._length - 1][0], shapePath.v[shapePath._length - 1][1]];
+      }
+      return pt;
+    },
+    vectorOnPath: function (perc, time, vectorType) {
+      // perc doesn't use triple equality because it can be a Number object as well as a primitive.
+      if (perc == 1) { // eslint-disable-line eqeqeq
+        perc = this.v.c;
+      } else if (perc == 0) { // eslint-disable-line eqeqeq
+        perc = 0.999;
+      }
+      var pt1 = this.pointOnPath(perc, time);
+      var pt2 = this.pointOnPath(perc + 0.001, time);
+      var xLength = pt2[0] - pt1[0];
+      var yLength = pt2[1] - pt1[1];
+      var magnitude = Math.sqrt(Math.pow(xLength, 2) + Math.pow(yLength, 2));
+      if (magnitude === 0) {
+        return [0, 0];
+      }
+      var unitVector = vectorType === 'tangent' ? [xLength / magnitude, yLength / magnitude] : [-yLength / magnitude, xLength / magnitude];
+      return unitVector;
+    },
+    tangentOnPath: function (perc, time) {
+      return this.vectorOnPath(perc, time, 'tangent');
+    },
+    normalOnPath: function (perc, time) {
+      return this.vectorOnPath(perc, time, 'normal');
+    },
+    setGroupProperty: expressionHelpers.setGroupProperty,
+    getValueAtTime: expressionHelpers.getStaticValueAtTime,
+  };
+  extendPrototype([ShapeExpressions], ShapePropertyConstructorFunction);
+  extendPrototype([ShapeExpressions], KeyframedShapePropertyConstructorFunction);
+  KeyframedShapePropertyConstructorFunction.prototype.getValueAtTime = getShapeValueAtTime;
+  KeyframedShapePropertyConstructorFunction.prototype.initiateExpression = ExpressionManager.initiateExpression;
+
+  var propertyGetShapeProp = ShapePropertyFactory.getShapeProp;
+  ShapePropertyFactory.getShapeProp = function (elem, data, type, arr, trims) {
+    var prop = propertyGetShapeProp(elem, data, type, arr, trims);
+    prop.propertyIndex = data.ix;
+    prop.lock = false;
+    if (type === 3) {
+      expressionHelpers.searchExpressions(elem, data.pt, prop);
+    } else if (type === 4) {
+      expressionHelpers.searchExpressions(elem, data.ks, prop);
+    }
+    if (prop.k) {
+      elem.addDynamicProperty(prop);
+    }
+    return prop;
+  };
+}
+
+function initialize() {
+  addPropertyDecorator();
+}
+
+export default initialize;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜĞ‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘Ù²D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionPropertyDecorator.js‘ÚD‡import {
+  extendPrototype,
+} from '../functionExtensions';
+import {
+  createSizedArray,
+  createTypedArray,
+} from '../helpers/arrays';
+import ShapePropertyFactory from '../shapes/ShapeProperty';
+import PropertyFactory from '../PropertyFactory';
+import shapePool from '../pooling/shape_pool';
+import {
+  initialDefaultFrame,
+} from '../../main';
+import bez from '../bez';
+import Matrix from '../../3rd_party/transformation-matrix';
+import TransformPropertyFactory from '../TransformProperty';
+import expressionHelpers from './expressionHelpers';
+import ExpressionManager from './ExpressionManager';
+
+function addPropertyDecorator() {
+  function loopOut(type, duration, durationFlag) {
+    if (!this.k || !this.keyframes) {
+      return this.pv;
+    }
+    type = type ? type.toLowerCase() : '';
+    var currentFrame = this.comp.renderedFrame;
+    var keyframes = this.keyframes;
+    var lastKeyFrame = keyframes[keyframes.length - 1].t;
+    if (currentFrame <= lastKeyFrame) {
+      return this.pv;
+    }
+    var cycleDuration;
+    var firstKeyFrame;
+    if (!durationFlag) {
+      if (!duration || duration > keyframes.length - 1) {
+        duration = keyframes.length - 1;
+      }
+      firstKeyFrame = keyframes[keyframes.length - 1 - duration].t;
+      cycleDuration = lastKeyFrame - firstKeyFrame;
+    } else {
+      if (!duration) {
+        cycleDuration = Math.max(0, lastKeyFrame - this.elem.data.ip);
+      } else {
+        cycleDuration = Math.abs(lastKeyFrame - this.elem.comp.globalData.frameRate * duration);
+      }
+      firstKeyFrame = lastKeyFrame - cycleDuration;
+    }
+    var i;
+    var len;
+    var ret;
+    if (type === 'pingpong') {
+      var iterations = Math.floor((currentFrame - firstKeyFrame) / cycleDuration);
+      if (iterations % 2 !== 0) {
+          return this.getValueAtTime(((cycleDuration - (currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      }
+    } else if (type === 'offset') {
+      var initV = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var endV = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+        var current = this.getValueAtTime(((currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      var repeats = Math.floor((currentFrame - firstKeyFrame) / cycleDuration);
+      if (this.pv.length) {
+        ret = new Array(initV.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = (endV[i] - initV[i]) * repeats + current[i];
+        }
+        return ret;
+      }
+      return (endV - initV) * repeats + current;
+    } else if (type === 'continue') {
+      var lastValue = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+      var nextLastValue = this.getValueAtTime((lastKeyFrame - 0.001) / this.comp.globalData.frameRate, 0);
+      if (this.pv.length) {
+        ret = new Array(lastValue.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+            ret[i] = lastValue[i] + (lastValue[i] - nextLastValue[i]) * ((currentFrame - lastKeyFrame) / this.comp.globalData.frameRate) / 0.0005; // eslint-disable-line
+        }
+        return ret;
+      }
+      return lastValue + (lastValue - nextLastValue) * (((currentFrame - lastKeyFrame)) / 0.001);
+    }
+      return this.getValueAtTime((((currentFrame - firstKeyFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+
+  }
+
+  function loopIn(type, duration, durationFlag) {
+    if (!this.k) {
+      return this.pv;
+    }
+    type = type ? type.toLowerCase() : '';
+    var currentFrame = this.comp.renderedFrame;
+    var keyframes = this.keyframes;
+    var firstKeyFrame = keyframes[0].t;
+    if (currentFrame >= firstKeyFrame) {
+      return this.pv;
+    }
+    var cycleDuration;
+    var lastKeyFrame;
+    if (!durationFlag) {
+      if (!duration || duration > keyframes.length - 1) {
+        duration = keyframes.length - 1;
+      }
+      lastKeyFrame = keyframes[duration].t;
+      cycleDuration = lastKeyFrame - firstKeyFrame;
+    } else {
+      if (!duration) {
+        cycleDuration = Math.max(0, this.elem.data.op - firstKeyFrame);
+      } else {
+        cycleDuration = Math.abs(this.elem.comp.globalData.frameRate * duration);
+      }
+      lastKeyFrame = firstKeyFrame + cycleDuration;
+    }
+    var i;
+    var len;
+    var ret;
+    if (type === 'pingpong') {
+      var iterations = Math.floor((firstKeyFrame - currentFrame) / cycleDuration);
+      if (iterations % 2 === 0) {
+          return this.getValueAtTime((((firstKeyFrame - currentFrame) % cycleDuration + firstKeyFrame)) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+      }
+    } else if (type === 'offset') {
+      var initV = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var endV = this.getValueAtTime(lastKeyFrame / this.comp.globalData.frameRate, 0);
+      var current = this.getValueAtTime((cycleDuration - ((firstKeyFrame - currentFrame) % cycleDuration) + firstKeyFrame) / this.comp.globalData.frameRate, 0);
+      var repeats = Math.floor((firstKeyFrame - currentFrame) / cycleDuration) + 1;
+      if (this.pv.length) {
+        ret = new Array(initV.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = current[i] - (endV[i] - initV[i]) * repeats;
+        }
+        return ret;
+      }
+      return current - (endV - initV) * repeats;
+    } else if (type === 'continue') {
+      var firstValue = this.getValueAtTime(firstKeyFrame / this.comp.globalData.frameRate, 0);
+      var nextFirstValue = this.getValueAtTime((firstKeyFrame + 0.001) / this.comp.globalData.frameRate, 0);
+      if (this.pv.length) {
+        ret = new Array(firstValue.length);
+        len = ret.length;
+        for (i = 0; i < len; i += 1) {
+          ret[i] = firstValue[i] + ((firstValue[i] - nextFirstValue[i]) * (firstKeyFrame - currentFrame)) / 0.001;
+        }
+        return ret;
+      }
+      return firstValue + ((firstValue - nextFirstValue) * (firstKeyFrame - currentFrame)) / 0.001;
+    }
+      return this.getValueAtTime(((cycleDuration - ((firstKeyFrame - currentFrame) % cycleDuration + firstKeyFrame))) / this.comp.globalData.frameRate, 0); // eslint-disable-line
+
+  }
+
+  function smooth(width, samples) {
+    if (!this.k) {
+      return this.pv;
+    }
+    width = (width || 0.4) * 0.5;
+    samples = Math.floor(samples || 5);
+    if (samples <= 1) {
+      return this.pv;
+    }
+    var currentTime = this.comp.renderedFrame / this.comp.globalData.frameRate;
+    var initFrame = currentTime - width;
+    var endFrame = currentTime + width;
+    var sampleFrequency = samples > 1 ? (endFrame - initFrame) / (samples - 1) : 1;
+    var i = 0;
+    var j = 0;
+    var value;
+    if (this.pv.length) {
+      value = createTypedArray('float32', this.pv.length);
+    } else {
+      value = 0;
+    }
+    var sampleValue;
+    while (i < samples) {
+      sampleValue = this.getValueAtTime(initFrame + i * sampleFrequency);
+      if (this.pv.length) {
+        for (j = 0; j < this.pv.length; j += 1) {
+          value[j] += sampleValue[j];
+        }
+      } else {
+        value += sampleValue;
+      }
+      i += 1;
+    }
+    if (this.pv.length) {
+      for (j = 0; j < this.pv.length; j += 1) {
+        value[j] /= samples;
+      }
+    } else {
+      value /= samples;
+    }
+    return value;
+  }
+
+  function getTransformValueAtTime(time) {
+    if (!this._transformCachingAtTime) {
+      this._transformCachingAtTime = {
+        v: new Matrix(),
+      };
+    }
+    /// /
+    var matrix = this._transformCachingAtTime.v;
+    matrix.cloneFromProps(this.pre.props);
+    if (this.appliedTransformations < 1) {
+      var anchor = this.a.getValueAtTime(time);
+      matrix.translate(
+        -anchor[0] * this.a.mult,
+        -anchor[1] * this.a.mult,
+        anchor[2] * this.a.mult
+      );
+    }
+    if (this.appliedTransformations < 2) {
+      var scale = this.s.getValueAtTime(time);
+      matrix.scale(
+        scale[0] * this.s.mult,
+        scale[1] * this.s.mult,
+        scale[2] * this.s.mult
+      );
+    }
+    if (this.sk && this.appliedTransformations < 3) {
+      var skew = this.sk.getValueAtTime(time);
+      var skewAxis = this.sa.getValueAtTime(time);
+      matrix.skewFromAxis(-skew * this.sk.mult, skewAxis * this.sa.mult);
+    }
+    if (this.r && this.appliedTransformations < 4) {
+      var rotation = this.r.getValueAtTime(time);
+      matrix.rotate(-rotation * this.r.mult);
+    } else if (!this.r && this.appliedTransformations < 4) {
+      var rotationZ = this.rz.getValueAtTime(time);
+      var rotationY = this.ry.getValueAtTime(time);
+      var rotationX = this.rx.getValueAtTime(time);
+      var orientation = this.or.getValueAtTime(time);
+      matrix.rotateZ(-rotationZ * this.rz.mult)
+        .rotateY(rotationY * this.ry.mult)
+        .rotateX(rotationX * this.rx.mult)
+        .rotateZ(-orientation[2] * this.or.mult)
+        .rotateY(orientation[1] * this.or.mult)
+        .rotateX(orientation[0] * this.or.mult);
+    }
+    if (this.data.p && this.data.p.s) {
+      var positionX = this.px.getValueAtTime(time);
+      var positionY = this.py.getValueAtTime(time);
+      if (this.data.p.z) {
+        var positionZ = this.pz.getValueAtTime(time);
+        matrix.translate(
+          positionX * this.px.mult,
+          positionY * this.py.mult,
+          -positionZ * this.pz.mult
+        );
+      } else {
+        matrix.translate(positionX * this.px.mult, positionY * this.py.mult, 0);
+      }
+    } else {
+      var position = this.p.getValueAtTime(time);
+      matrix.translate(
+        position[0] * this.p.mult,
+        position[1] * this.p.mult,
+        -position[2] * this.p.mult
+      );
+    }
+    return matrix;
+    /// /
+  }
+
+  function getTransformStaticValueAtTime() {
+    return this.v.clone(new Matrix());
+  }
+
+  var getTransformProperty = TransformPropertyFactory.getTransformProperty;
+  TransformPropertyFactory.getTransformProperty = function (elem, data, container) {
+    var prop = getTransformProperty(elem, data, container);
+    if (prop.dynamicProperties.length) {
+      prop.getValueAtTime = getTransformValueAtTime.bind(prop);
+    } else {
+      prop.getValueAtTime = getTransformStaticValueAtTime.bind(prop);
+    }
+    prop.setGroupProperty = expressionHelpers.setGroupProperty;
+    return prop;
+  };
+
+  var propertyGetProp = PropertyFactory.getProp;
+  PropertyFactory.getProp = function (elem, data, type, mult, container) {
+    var prop = propertyGetProp(elem, data, type, mult, container);
+    // prop.getVelocityAtTime = getVelocityAtTime;
+    // prop.loopOut = loopOut;
+    // prop.loopIn = loopIn;
+    if (prop.kf) {
+      prop.getValueAtTime = expressionHelpers.getValueAtTime.bind(prop);
+    } else {
+      prop.getValueAtTime = expressionHelpers.getStaticValueAtTime.bind(prop);
+    }
+    prop.setGroupProperty = expressionHelpers.setGroupProperty;
+    prop.loopOut = loopOut;
+    prop.loopIn = loopIn;
+    prop.smooth = smooth;
+    prop.getVelocityAtTime = expressionHelpers.getVelocityAtTime.bind(prop);
+    prop.getSpeedAtTime = expressionHelpers.getSpeedAtTime.bind(prop);
+    prop.numKeys = data.a === 1 ? data.k.length : 0;
+    prop.propertyIndex = data.ix;
+    var value = 0;
+    if (type !== 0) {
+      value = createTypedArray('float32', data.a === 1 ? data.k[0].s.length : data.k.length);
+    }
+    prop._cachingAtTime = {
+      lastFrame: initialDefaultFrame,
+      lastIndex: 0,
+      value: value,
+    };
+    expressionHelpers.searchExpressions(elem, data, prop);
+    if (prop.k) {
+      container.addDynamicProperty(prop);
+    }
+
+    return prop;
+  };
+
+  function getShapeValueAtTime(frameNum) {
+    // For now this caching object is created only when needed instead of creating it when the shape is initialized.
+    if (!this._cachingAtTime) {
+      this._cachingAtTime = {
+        shapeValue: shapePool.clone(this.pv),
+        lastIndex: 0,
+        lastTime: initialDefaultFrame,
+      };
+    }
+
+    frameNum *= this.elem.globalData.frameRate;
+    frameNum -= this.offsetTime;
+    if (frameNum !== this._cachingAtTime.lastTime) {
+      this._cachingAtTime.lastIndex = this._cachingAtTime.lastTime < frameNum ? this._caching.lastIndex : 0;
+      this._cachingAtTime.lastTime = frameNum;
+      this.interpolateShape(frameNum, this._cachingAtTime.shapeValue, this._cachingAtTime);
+    }
+    return this._cachingAtTime.shapeValue;
+  }
+
+  var ShapePropertyConstructorFunction = ShapePropertyFactory.getConstructorFunction();
+  var KeyframedShapePropertyConstructorFunction = ShapePropertyFactory.getKeyframedConstructorFunction();
+
+  function ShapeExpressions() {}
+  ShapeExpressions.prototype = {
+    vertices: function (prop, time) {
+      if (this.k) {
+        this.getValue();
+      }
+      var shapePath = this.v;
+      if (time !== undefined) {
+        shapePath = this.getValueAtTime(time, 0);
+      }
+      var i;
+      var len = shapePath._length;
+      var vertices = shapePath[prop];
+      var points = shapePath.v;
+      var arr = createSizedArray(len);
+      for (i = 0; i < len; i += 1) {
+        if (prop === 'i' || prop === 'o') {
+          arr[i] = [vertices[i][0] - points[i][0], vertices[i][1] - points[i][1]];
+        } else {
+          arr[i] = [vertices[i][0], vertices[i][1]];
+        }
+      }
+      return arr;
+    },
+    points: function (time) {
+      return this.vertices('v', time);
+    },
+    inTangents: function (time) {
+      return this.vertices('i', time);
+    },
+    outTangents: function (time) {
+      return this.vertices('o', time);
+    },
+    isClosed: function () {
+      return this.v.c;
+    },
+    pointOnPath: function (perc, time) {
+      var shapePath = this.v;
+      if (time !== undefined) {
+        shapePath = this.getValueAtTime(time, 0);
+      }
+      if (!this._segmentsLength) {
+        this._segmentsLength = bez.getSegmentsLength(shapePath);
+      }
+
+      var segmentsLength = this._segmentsLength;
+      var lengths = segmentsLength.lengths;
+      var lengthPos = segmentsLength.totalLength * perc;
+      var i = 0;
+      var len = lengths.length;
+      var accumulatedLength = 0;
+      var pt;
+      while (i < len) {
+        if (accumulatedLength + lengths[i].addedLength > lengthPos) {
+          var initIndex = i;
+          var endIndex = (shapePath.c && i === len - 1) ? 0 : i + 1;
+          var segmentPerc = (lengthPos - accumulatedLength) / lengths[i].addedLength;
+          pt = bez.getPointInSegment(shapePath.v[initIndex], shapePath.v[endIndex], shapePath.o[initIndex], shapePath.i[endIndex], segmentPerc, lengths[i]);
+          break;
+        } else {
+          accumulatedLength += lengths[i].addedLength;
+        }
+        i += 1;
+      }
+      if (!pt) {
+        pt = shapePath.c ? [shapePath.v[0][0], shapePath.v[0][1]] : [shapePath.v[shapePath._length - 1][0], shapePath.v[shapePath._length - 1][1]];
+      }
+      return pt;
+    },
+    vectorOnPath: function (perc, time, vectorType) {
+      // perc doesn't use triple equality because it can be a Number object as well as a primitive.
+      if (perc == 1) { // eslint-disable-line eqeqeq
+        perc = this.v.c;
+      } else if (perc == 0) { // eslint-disable-line eqeqeq
+        perc = 0.999;
+      }
+      var pt1 = this.pointOnPath(perc, time);
+      var pt2 = this.pointOnPath(perc + 0.001, time);
+      var xLength = pt2[0] - pt1[0];
+      var yLength = pt2[1] - pt1[1];
+      var magnitude = Math.sqrt(Math.pow(xLength, 2) + Math.pow(yLength, 2));
+      if (magnitude === 0) {
+        return [0, 0];
+      }
+      var unitVector = vectorType === 'tangent' ? [xLength / magnitude, yLength / magnitude] : [-yLength / magnitude, xLength / magnitude];
+      return unitVector;
+    },
+    tangentOnPath: function (perc, time) {
+      return this.vectorOnPath(perc, time, 'tangent');
+    },
+    normalOnPath: function (perc, time) {
+      return this.vectorOnPath(perc, time, 'normal');
+    },
+    setGroupProperty: expressionHelpers.setGroupProperty,
+    getValueAtTime: expressionHelpers.getStaticValueAtTime,
+  };
+  extendPrototype([ShapeExpressions], ShapePropertyConstructorFunction);
+  extendPrototype([ShapeExpressions], KeyframedShapePropertyConstructorFunction);
+  KeyframedShapePropertyConstructorFunction.prototype.getValueAtTime = getShapeValueAtTime;
+  KeyframedShapePropertyConstructorFunction.prototype.initiateExpression = ExpressionManager.initiateExpression;
+
+  var propertyGetShapeProp = ShapePropertyFactory.getShapeProp;
+  ShapePropertyFactory.getShapeProp = function (elem, data, type, arr, trims) {
+    var prop = propertyGetShapeProp(elem, data, type, arr, trims);
+    prop.propertyIndex = data.ix;
+    prop.lock = false;
+    if (type === 3) {
+      expressionHelpers.searchExpressions(elem, data.pt, prop);
+    } else if (type === 4) {
+      expressionHelpers.searchExpressions(elem, data.ks, prop);
+    }
+    if (prop.k) {
+      elem.addDynamicProperty(prop);
+    }
+    return prop;
+  };
+}
+
+function initialize() {
+  addPropertyDecorator();
+}
+
+export default initialize;
+ÔrF›ª../../main²../PropertyFactory·../shapes/ShapeProperty±../helpers/arraysÙ%../../3rd_party/transformation-matrixµ../functionExtensions´../TransformProperty¦../bezµ../pooling/shape_pool³./expressionHelpers³./ExpressionManagerÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsAÃªoh-resolveÂGAÂÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\PropertyFactory.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeProperty.jsAÃªoh-resolveÂGAÂÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\arrays.jsAÃªoh-resolveÂGAÂÙ¤D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\3rd_party\transformation-matrix.jsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsAÃªoh-resolveÂGAÂÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\TransformProperty.jsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\bez.jsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\pooling\shape_pool.jsAÃªoh-resolveÂGAÂÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\expressionHelpers.jsAÃªoh-resolveÂGAÂÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionManager.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache›ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration =‘ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÔrL”¤type¥start£end¤nameªIdentifier¯extendPrototypeLªIdentifier¯extendPrototypeÔrM•¤type¥start£end¥value£raw§Literal%<µ../functionExtensions·'../functionExtensions'J±ImportDeclaration?Ì’K¯ImportSpecifierÌKÌ[LªIdentifierÌKÌ[°createSizedArrayLªIdentifierÌKÌ[°createSizedArrayK¯ImportSpecifierÌ`ÌpLªIdentifierÌ`Ìp°createTypedArrayLªIdentifierÌ`Ìp°createTypedArrayM§LiteralÌzÌ±../helpers/arrays³'../helpers/arrays'J±ImportDeclarationÌÌË‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifierÌ—Ì«LªIdentifierÌ—Ì«´ShapePropertyFactoryM§LiteralÌ±ÌÊ·../shapes/ShapeProperty¹'../shapes/ShapeProperty'J±ImportDeclarationÌÍÌş‘N¶ImportDefaultSpecifierÌÔÌãLªIdentifierÌÔÌã¯PropertyFactoryM§LiteralÌéÌı²../PropertyFactory´'../PropertyFactory'J±ImportDeclarationÍ Í.‘N¶ImportDefaultSpecifierÍÍLªIdentifierÍÍ©shapePoolM§LiteralÍÍ-µ../pooling/shape_pool·'../pooling/shape_pool'J±ImportDeclarationÍ0Íf‘K¯ImportSpecifierÍ<ÍOLªIdentifierÍ<ÍO³initialDefaultFrameLªIdentifierÍ<ÍO³initialDefaultFrameM§LiteralÍYÍeª../../main¬'../../main'J±ImportDeclarationÍhÍ‘N¶ImportDefaultSpecifierÍoÍrLªIdentifierÍoÍr£bezM§LiteralÍxÍ€¦../bez¨'../bez'J±ImportDeclarationÍƒÍ¾‘N¶ImportDefaultSpecifierÍŠÍLªIdentifierÍŠÍ¦MatrixM§LiteralÍ–Í½Ù%../../3rd_party/transformation-matrixÙ''../../3rd_party/transformation-matrix'J±ImportDeclarationÍÀÍü‘N¶ImportDefaultSpecifierÍÇÍßLªIdentifierÍÇÍß¸TransformPropertyFactoryM§LiteralÍåÍû´../TransformProperty¶'../TransformProperty'J±ImportDeclarationÍşÍ2‘N¶ImportDefaultSpecifierÍÍLªIdentifierÍÍ±expressionHelpersM§LiteralÍÍ1³./expressionHelpersµ'./expressionHelpers'J±ImportDeclarationÍ4Íh‘N¶ImportDefaultSpecifierÍ;ÍLLªIdentifierÍ;ÍL±ExpressionManagerM§LiteralÍRÍg³./ExpressionManagerµ'./ExpressionManager'

@@ -20,6 +20,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 // PullToRefreshNews.ets
 import { PullToRefresh } from '@ohos/pulltorefresh/index';
 // [End pull_to_refresh]
+import { router } from '@kit.ArkUI';  // 添加这一行
 import { BreakpointConstants } from '../constants/BreakpointConstants';
 import { CommonConstants } from '../constants/CommonConstants';
 import { BreakpointType } from '../utils/BreakpointType';
@@ -136,7 +137,8 @@ export struct PullToRefreshNews {
               newsTitle: item.newsTitle,
               newsContent: item.newsContent,
               newsTime: item.newsTime,
-              newsImage: item.newsImage
+              newsImage: item.newsImage,
+              newsId: item.newsId  // 添加这一行
               // [EndExclude news_title]
             })
           }
@@ -230,6 +232,7 @@ struct newsItem {
   newsContent: string | Resource = '';
   newsTime: string | Resource = '';
   newsImage: string | Resource = '';
+  newsId: string = '';
 
   build() {
     Row() {
@@ -297,6 +300,22 @@ struct newsItem {
       right: $r('app.string.news_row_padding')
     })
     .height($r('app.string.news_item_height'))
+    // 添加点击事件处理
+    .onClick(() => {
+      // 跳转到新闻详情页
+      router.pushUrl({
+        url: 'pages/NewsDetail',
+        params: {
+          newsData: {
+            newsId: this.newsId,
+            newsTitle: this.newsTitle,
+            newsContent: this.newsContent,
+            newsTime: this.newsTime,
+            newsImage: this.newsImage
+          }
+        }
+      });
+    })
   }
 
   // [EndExclude news_item]

@@ -1,6 +1,8 @@
 {
   "src": [
     "pages/Index",
-    "pages/CitySearch"
+    "pages/CitySearch",
+    "pages/NewsDetail",
+    "pages/CommentPage"
   ]
 }

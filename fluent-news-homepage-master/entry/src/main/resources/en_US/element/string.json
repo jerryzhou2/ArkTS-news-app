@@ -169,6 +169,22 @@
       "value": "Tab8"
     },
     {
+      "name": "back",
+      "value": "Back"
+    },
+    {
+      "name": "news_detail_time_margin_top",
+      "value": "10vp"
+    },
+    {
+      "name": "news_detail_image_margin_top",
+      "value": "20vp"
+    },
+    {
+      "name": "news_detail_content_margin_top",
+      "value": "20vp"
+    },
+    {
       "name": "location_desc",
       "value": "Allow the app to obtain the device's location information in the news homepage scenario"
     },

@@ -1,0 +1,1355 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚB€import {
+  extendPrototype,
+} from '../../utils/functionExtensions';
+import { getLocationHref } from '../../main';
+import ShapePropertyFactory from '../../utils/shapes/ShapeProperty';
+import BaseElement from '../BaseElement';
+import TransformElement from '../helpers/TransformElement';
+import SVGBaseElement from './SVGBaseElement';
+import HierarchyElement from '../helpers/HierarchyElement';
+import FrameElement from '../helpers/FrameElement';
+import RenderableDOMElement from '../helpers/RenderableDOMElement';
+import getBlendMode from '../../utils/helpers/blendModes';
+import Matrix from '../../3rd_party/transformation-matrix';
+import IShapeElement from '../ShapeElement';
+import TransformPropertyFactory from '../../utils/TransformProperty';
+import { ShapeModifiers } from '../../utils/shapes/ShapeModifiers';
+import {
+  lineCapEnum,
+  lineJoinEnum,
+} from '../../utils/helpers/shapeEnums';
+import SVGShapeData from '../helpers/shapes/SVGShapeData';
+import SVGStyleData from '../helpers/shapes/SVGStyleData';
+import SVGStrokeStyleData from '../helpers/shapes/SVGStrokeStyleData';
+import SVGFillStyleData from '../helpers/shapes/SVGFillStyleData';
+import SVGNoStyleData from '../helpers/shapes/SVGNoStyleData';
+import SVGGradientFillStyleData from '../helpers/shapes/SVGGradientFillStyleData';
+import SVGGradientStrokeStyleData from '../helpers/shapes/SVGGradientStrokeStyleData';
+import ShapeGroupData from '../helpers/shapes/ShapeGroupData';
+import SVGTransformData from '../helpers/shapes/SVGTransformData';
+import SVGElementsRenderer from '../helpers/shapes/SVGElementsRenderer';
+
+function SVGShapeElement(data, globalData, comp) {
+  // List of drawable elements
+  this.shapes = [];
+  // Full shape data
+  this.shapesData = data.shapes;
+  // List of styles that will be applied to shapes
+  this.stylesList = [];
+  // List of modifiers that will be applied to shapes
+  this.shapeModifiers = [];
+  // List of items in shape tree
+  this.itemsData = [];
+  // List of items in previous shape tree
+  this.processedElements = [];
+  // List of animated components
+  this.animatedContents = [];
+  this.initElement(data, globalData, comp);
+  // Moving any property that doesn't get too much access after initialization because of v8 way of handling more than 10 properties.
+  // List of elements that have been created
+  this.prevViewData = [];
+  // Moving any property that doesn't get too much access after initialization because of v8 way of handling more than 10 properties.
+}
+
+extendPrototype([BaseElement, TransformElement, SVGBaseElement, IShapeElement, HierarchyElement, FrameElement, RenderableDOMElement], SVGShapeElement);
+
+SVGShapeElement.prototype.initSecondaryElement = function () {
+};
+
+SVGShapeElement.prototype.identityMatrix = new Matrix();
+
+SVGShapeElement.prototype.buildExpressionInterface = function () {};
+
+SVGShapeElement.prototype.createContent = function () {
+  this.searchShapes(this.shapesData, this.itemsData, this.prevViewData, this.layerElement, 0, [], true);
+  this.filterUniqueShapes();
+};
+
+/*
+This method searches for multiple shapes that affect a single element and one of them is animated
+*/
+SVGShapeElement.prototype.filterUniqueShapes = function () {
+  var i;
+  var len = this.shapes.length;
+  var shape;
+  var j;
+  var jLen = this.stylesList.length;
+  var style;
+  var tempShapes = [];
+  var areAnimated = false;
+  for (j = 0; j < jLen; j += 1) {
+    style = this.stylesList[j];
+    areAnimated = false;
+    tempShapes.length = 0;
+    for (i = 0; i < len; i += 1) {
+      shape = this.shapes[i];
+      if (shape.styles.indexOf(style) !== -1) {
+        tempShapes.push(shape);
+        areAnimated = shape._isAnimated || areAnimated;
+      }
+    }
+    if (tempShapes.length > 1 && areAnimated) {
+      this.setShapesAsAnimated(tempShapes);
+    }
+  }
+};
+
+SVGShapeElement.prototype.setShapesAsAnimated = function (shapes) {
+  var i;
+  var len = shapes.length;
+  for (i = 0; i < len; i += 1) {
+    shapes[i].setAsAnimated();
+  }
+};
+
+SVGShapeElement.prototype.createStyleElement = function (data, level) {
+  // TODO: prevent drawing of hidden styles
+  var elementData;
+  var styleOb = new SVGStyleData(data, level);
+
+  var pathElement = styleOb.pElem;
+  if (data.ty === 'st') {
+    elementData = new SVGStrokeStyleData(this, data, styleOb);
+  } else if (data.ty === 'fl') {
+    elementData = new SVGFillStyleData(this, data, styleOb);
+  } else if (data.ty === 'gf' || data.ty === 'gs') {
+    var GradientConstructor = data.ty === 'gf' ? SVGGradientFillStyleData : SVGGradientStrokeStyleData;
+    elementData = new GradientConstructor(this, data, styleOb);
+    this.globalData.defs.appendChild(elementData.gf);
+    if (elementData.maskId) {
+      this.globalData.defs.appendChild(elementData.ms);
+      this.globalData.defs.appendChild(elementData.of);
+      pathElement.setAttribute('mask', 'url(' + getLocationHref() + '#' + elementData.maskId + ')');
+    }
+  } else if (data.ty === 'no') {
+    elementData = new SVGNoStyleData(this, data, styleOb);
+  }
+
+  if (data.ty === 'st' || data.ty === 'gs') {
+    pathElement.setAttribute('stroke-linecap', lineCapEnum[data.lc || 2]);
+    pathElement.setAttribute('stroke-linejoin', lineJoinEnum[data.lj || 2]);
+    pathElement.setAttribute('fill-opacity', '0');
+    if (data.lj === 1) {
+      pathElement.setAttribute('stroke-miterlimit', data.ml);
+    }
+  }
+
+  if (data.r === 2) {
+    pathElement.setAttribute('fill-rule', 'evenodd');
+  }
+
+  if (data.ln) {
+    pathElement.setAttribute('id', data.ln);
+  }
+  if (data.cl) {
+    pathElement.setAttribute('class', data.cl);
+  }
+  if (data.bm) {
+    pathElement.style['mix-blend-mode'] = getBlendMode(data.bm);
+  }
+  this.stylesList.push(styleOb);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.createGroupElement = function (data) {
+  var elementData = new ShapeGroupData();
+  if (data.ln) {
+    elementData.gr.setAttribute('id', data.ln);
+  }
+  if (data.cl) {
+    elementData.gr.setAttribute('class', data.cl);
+  }
+  if (data.bm) {
+    elementData.gr.style['mix-blend-mode'] = getBlendMode(data.bm);
+  }
+  return elementData;
+};
+
+SVGShapeElement.prototype.createTransformElement = function (data, container) {
+  var transformProperty = TransformPropertyFactory.getTransformProperty(this, data, this);
+  var elementData = new SVGTransformData(transformProperty, transformProperty.o, container);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.createShapeElement = function (data, ownTransformers, level) {
+  var ty = 4;
+  if (data.ty === 'rc') {
+    ty = 5;
+  } else if (data.ty === 'el') {
+    ty = 6;
+  } else if (data.ty === 'sr') {
+    ty = 7;
+  }
+  var shapeProperty = ShapePropertyFactory.getShapeProp(this, data, ty, this);
+  var elementData = new SVGShapeData(ownTransformers, level, shapeProperty);
+  this.shapes.push(elementData);
+  this.addShapeToModifiers(elementData);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.addToAnimatedContents = function (data, element) {
+  var i = 0;
+  var len = this.animatedContents.length;
+  while (i < len) {
+    if (this.animatedContents[i].element === element) {
+      return;
+    }
+    i += 1;
+  }
+  this.animatedContents.push({
+    fn: SVGElementsRenderer.createRenderFunction(data),
+    element: element,
+    data: data,
+  });
+};
+
+SVGShapeElement.prototype.setElementStyles = function (elementData) {
+  var arr = elementData.styles;
+  var j;
+  var jLen = this.stylesList.length;
+  for (j = 0; j < jLen; j += 1) {
+    if (!this.stylesList[j].closed) {
+      arr.push(this.stylesList[j]);
+    }
+  }
+};
+
+SVGShapeElement.prototype.reloadShapes = function () {
+  this._isFirstFrame = true;
+  var i;
+  var len = this.itemsData.length;
+  for (i = 0; i < len; i += 1) {
+    this.prevViewData[i] = this.itemsData[i];
+  }
+  this.searchShapes(this.shapesData, this.itemsData, this.prevViewData, this.layerElement, 0, [], true);
+  this.filterUniqueShapes();
+  len = this.dynamicProperties.length;
+  for (i = 0; i < len; i += 1) {
+    this.dynamicProperties[i].getValue();
+  }
+  this.renderModifiers();
+};
+
+SVGShapeElement.prototype.searchShapes = function (arr, itemsData, prevViewData, container, level, transformers, render) {
+  var ownTransformers = [].concat(transformers);
+  var i;
+  var len = arr.length - 1;
+  var j;
+  var jLen;
+  var ownStyles = [];
+  var ownModifiers = [];
+  var currentTransform;
+  var modifier;
+  var processedPos;
+  for (i = len; i >= 0; i -= 1) {
+    processedPos = this.searchProcessedElement(arr[i]);
+    if (!processedPos) {
+      arr[i]._render = render;
+    } else {
+      itemsData[i] = prevViewData[processedPos - 1];
+    }
+    if (arr[i].ty === 'fl' || arr[i].ty === 'st' || arr[i].ty === 'gf' || arr[i].ty === 'gs' || arr[i].ty === 'no') {
+      if (!processedPos) {
+        itemsData[i] = this.createStyleElement(arr[i], level);
+      } else {
+        itemsData[i].style.closed = false;
+      }
+      if (arr[i]._render) {
+        if (itemsData[i].style.pElem.parentNode !== container) {
+          container.appendChild(itemsData[i].style.pElem);
+        }
+      }
+      ownStyles.push(itemsData[i].style);
+    } else if (arr[i].ty === 'gr') {
+      if (!processedPos) {
+        itemsData[i] = this.createGroupElement(arr[i]);
+      } else {
+        jLen = itemsData[i].it.length;
+        for (j = 0; j < jLen; j += 1) {
+          itemsData[i].prevViewData[j] = itemsData[i].it[j];
+        }
+      }
+      this.searchShapes(arr[i].it, itemsData[i].it, itemsData[i].prevViewData, itemsData[i].gr, level + 1, ownTransformers, render);
+      if (arr[i]._render) {
+        if (itemsData[i].gr.parentNode !== container) {
+          container.appendChild(itemsData[i].gr);
+        }
+      }
+    } else if (arr[i].ty === 'tr') {
+      if (!processedPos) {
+        itemsData[i] = this.createTransformElement(arr[i], container);
+      }
+      currentTransform = itemsData[i].transform;
+      ownTransformers.push(currentTransform);
+    } else if (arr[i].ty === 'sh' || arr[i].ty === 'rc' || arr[i].ty === 'el' || arr[i].ty === 'sr') {
+      if (!processedPos) {
+        itemsData[i] = this.createShapeElement(arr[i], ownTransformers, level);
+      }
+      this.setElementStyles(itemsData[i]);
+    } else if (arr[i].ty === 'tm' || arr[i].ty === 'rd' || arr[i].ty === 'ms' || arr[i].ty === 'pb' || arr[i].ty === 'zz' || arr[i].ty === 'op') {
+      if (!processedPos) {
+        modifier = ShapeModifiers.getModifier(arr[i].ty);
+        modifier.init(this, arr[i]);
+        itemsData[i] = modifier;
+        this.shapeModifiers.push(modifier);
+      } else {
+        modifier = itemsData[i];
+        modifier.closed = false;
+      }
+      ownModifiers.push(modifier);
+    } else if (arr[i].ty === 'rp') {
+      if (!processedPos) {
+        modifier = ShapeModifiers.getModifier(arr[i].ty);
+        itemsData[i] = modifier;
+        modifier.init(this, arr, i, itemsData);
+        this.shapeModifiers.push(modifier);
+        render = false;
+      } else {
+        modifier = itemsData[i];
+        modifier.closed = true;
+      }
+      ownModifiers.push(modifier);
+    }
+    this.addProcessedElement(arr[i], i + 1);
+  }
+  len = ownStyles.length;
+  for (i = 0; i < len; i += 1) {
+    ownStyles[i].closed = true;
+  }
+  len = ownModifiers.length;
+  for (i = 0; i < len; i += 1) {
+    ownModifiers[i].closed = true;
+  }
+};
+
+SVGShapeElement.prototype.renderInnerContent = function () {
+  this.renderModifiers();
+  var i;
+  var len = this.stylesList.length;
+  for (i = 0; i < len; i += 1) {
+    this.stylesList[i].reset();
+  }
+  this.renderShape();
+  for (i = 0; i < len; i += 1) {
+    if (this.stylesList[i]._mdf || this._isFirstFrame) {
+      if (this.stylesList[i].msElem) {
+        this.stylesList[i].msElem.setAttribute('d', this.stylesList[i].d);
+        // Adding M0 0 fixes same mask bug on all browsers
+        this.stylesList[i].d = 'M0 0' + this.stylesList[i].d;
+      }
+      this.stylesList[i].pElem.setAttribute('d', this.stylesList[i].d || 'M0 0');
+    }
+  }
+};
+
+SVGShapeElement.prototype.renderShape = function () {
+  var i;
+  var len = this.animatedContents.length;
+  var animatedContent;
+  for (i = 0; i < len; i += 1) {
+    animatedContent = this.animatedContents[i];
+    if ((this._isFirstFrame || animatedContent.element._isAnimated) && animatedContent.data !== true) {
+      animatedContent.fn(animatedContent.data, animatedContent.element, this._isFirstFrame);
+    }
+  }
+};
+SVGShapeElement.prototype.renderShapeColor = function (color, endColor) {
+  var i;
+  var len = this.animatedContents.length;
+  var animatedContent;
+  for (i = 0; i < len; i += 1) {
+    animatedContent = this.animatedContents[i];
+    if ((this._isFirstFrame || animatedContent.element._isAnimated) && animatedContent.data !== true) {
+      if (animatedContent.element.c && (animatedContent.element.c._mdf || this._isFirstFrame)) {
+        try {
+          if (!!endColor && endColor.length > 0) {
+            if (color.length == 4) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[1] = color[1] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[2] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[1] = endColor[1] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[2] / 255.0;
+
+              animatedContent.element.o.v = color[3];
+            } else if (color.length == 3) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[1] = color[1] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[2] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[1] = endColor[1] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[2] / 255.0;
+            } else if (color.length == 2) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[1] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[1] / 255.0;
+            } else if (color.length == 1) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+            }
+          } else {
+            if (color.length == 4) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[1] = color[1];
+              animatedContent.element.c.v[2] = color[2];
+              animatedContent.element.o.v = color[3];
+            } else if (color.length == 3) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[1] = color[1];
+              animatedContent.element.c.v[2] = color[2];
+            } else if (color.length == 2) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[2] = color[1];
+            } else if (color.length == 1) {
+              animatedContent.element.c.v[0] = color[0];
+            }
+          }
+        } catch (error) {
+        }
+      } else {
+        try {
+          if (animatedContent.element.g && (animatedContent.element.g._cmdf || this._isFirstFrame)) {
+            var lens = 3;
+            var j;
+            for (j = 0; j < lens; j += 1) {
+              if (color.length >= 3) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+                animatedContent.element.g.c[j * 4 + 2] = color[1];
+                animatedContent.element.g.c[j * 4 + 3] = color[2];
+              } else if (color.length == 2) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+                animatedContent.element.g.c[j * 4 + 2] = color[1];
+              } else if (color.length == 1) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+              }
+            }
+          }
+        } catch (error) {
+        }
+      }
+    }
+  }
+};
+
+SVGShapeElement.prototype.destroy = function () {
+  this.destroyBaseElement();
+  this.shapesData = null;
+  this.itemsData = null;
+};
+
+export default SVGShapeElement;
+ÂÜ ÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeProperty.jsÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\BaseElement.jsÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\TransformElement.jsÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\svgElements\SVGBaseElement.jsÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\HierarchyElement.jsÙ¢D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\FrameElement.jsÙªD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\RenderableDOMElement.jsÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\blendModes.jsÙ¤D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\3rd_party\transformation-matrix.jsÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\ShapeElement.jsÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\TransformProperty.jsÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeModifiers.jsÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\shapeEnums.jsÙ©D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGShapeData.jsÙ©D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGStyleData.jsÙ¯D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGStrokeStyleData.jsÙ­D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGFillStyleData.jsÙ«D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGNoStyleData.jsÙµD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGGradientFillStyleData.jsÙ·D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGGradientStrokeStyleData.jsÙ«D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\ShapeGroupData.jsÙ­D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGTransformData.jsÙ°D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGElementsRenderer.jsÙ©D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\svgElements\SVGShapeElement.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚB€import {
+  extendPrototype,
+} from '../../utils/functionExtensions';
+import { getLocationHref } from '../../main';
+import ShapePropertyFactory from '../../utils/shapes/ShapeProperty';
+import BaseElement from '../BaseElement';
+import TransformElement from '../helpers/TransformElement';
+import SVGBaseElement from './SVGBaseElement';
+import HierarchyElement from '../helpers/HierarchyElement';
+import FrameElement from '../helpers/FrameElement';
+import RenderableDOMElement from '../helpers/RenderableDOMElement';
+import getBlendMode from '../../utils/helpers/blendModes';
+import Matrix from '../../3rd_party/transformation-matrix';
+import IShapeElement from '../ShapeElement';
+import TransformPropertyFactory from '../../utils/TransformProperty';
+import { ShapeModifiers } from '../../utils/shapes/ShapeModifiers';
+import {
+  lineCapEnum,
+  lineJoinEnum,
+} from '../../utils/helpers/shapeEnums';
+import SVGShapeData from '../helpers/shapes/SVGShapeData';
+import SVGStyleData from '../helpers/shapes/SVGStyleData';
+import SVGStrokeStyleData from '../helpers/shapes/SVGStrokeStyleData';
+import SVGFillStyleData from '../helpers/shapes/SVGFillStyleData';
+import SVGNoStyleData from '../helpers/shapes/SVGNoStyleData';
+import SVGGradientFillStyleData from '../helpers/shapes/SVGGradientFillStyleData';
+import SVGGradientStrokeStyleData from '../helpers/shapes/SVGGradientStrokeStyleData';
+import ShapeGroupData from '../helpers/shapes/ShapeGroupData';
+import SVGTransformData from '../helpers/shapes/SVGTransformData';
+import SVGElementsRenderer from '../helpers/shapes/SVGElementsRenderer';
+
+function SVGShapeElement(data, globalData, comp) {
+  // List of drawable elements
+  this.shapes = [];
+  // Full shape data
+  this.shapesData = data.shapes;
+  // List of styles that will be applied to shapes
+  this.stylesList = [];
+  // List of modifiers that will be applied to shapes
+  this.shapeModifiers = [];
+  // List of items in shape tree
+  this.itemsData = [];
+  // List of items in previous shape tree
+  this.processedElements = [];
+  // List of animated components
+  this.animatedContents = [];
+  this.initElement(data, globalData, comp);
+  // Moving any property that doesn't get too much access after initialization because of v8 way of handling more than 10 properties.
+  // List of elements that have been created
+  this.prevViewData = [];
+  // Moving any property that doesn't get too much access after initialization because of v8 way of handling more than 10 properties.
+}
+
+extendPrototype([BaseElement, TransformElement, SVGBaseElement, IShapeElement, HierarchyElement, FrameElement, RenderableDOMElement], SVGShapeElement);
+
+SVGShapeElement.prototype.initSecondaryElement = function () {
+};
+
+SVGShapeElement.prototype.identityMatrix = new Matrix();
+
+SVGShapeElement.prototype.buildExpressionInterface = function () {};
+
+SVGShapeElement.prototype.createContent = function () {
+  this.searchShapes(this.shapesData, this.itemsData, this.prevViewData, this.layerElement, 0, [], true);
+  this.filterUniqueShapes();
+};
+
+/*
+This method searches for multiple shapes that affect a single element and one of them is animated
+*/
+SVGShapeElement.prototype.filterUniqueShapes = function () {
+  var i;
+  var len = this.shapes.length;
+  var shape;
+  var j;
+  var jLen = this.stylesList.length;
+  var style;
+  var tempShapes = [];
+  var areAnimated = false;
+  for (j = 0; j < jLen; j += 1) {
+    style = this.stylesList[j];
+    areAnimated = false;
+    tempShapes.length = 0;
+    for (i = 0; i < len; i += 1) {
+      shape = this.shapes[i];
+      if (shape.styles.indexOf(style) !== -1) {
+        tempShapes.push(shape);
+        areAnimated = shape._isAnimated || areAnimated;
+      }
+    }
+    if (tempShapes.length > 1 && areAnimated) {
+      this.setShapesAsAnimated(tempShapes);
+    }
+  }
+};
+
+SVGShapeElement.prototype.setShapesAsAnimated = function (shapes) {
+  var i;
+  var len = shapes.length;
+  for (i = 0; i < len; i += 1) {
+    shapes[i].setAsAnimated();
+  }
+};
+
+SVGShapeElement.prototype.createStyleElement = function (data, level) {
+  // TODO: prevent drawing of hidden styles
+  var elementData;
+  var styleOb = new SVGStyleData(data, level);
+
+  var pathElement = styleOb.pElem;
+  if (data.ty === 'st') {
+    elementData = new SVGStrokeStyleData(this, data, styleOb);
+  } else if (data.ty === 'fl') {
+    elementData = new SVGFillStyleData(this, data, styleOb);
+  } else if (data.ty === 'gf' || data.ty === 'gs') {
+    var GradientConstructor = data.ty === 'gf' ? SVGGradientFillStyleData : SVGGradientStrokeStyleData;
+    elementData = new GradientConstructor(this, data, styleOb);
+    this.globalData.defs.appendChild(elementData.gf);
+    if (elementData.maskId) {
+      this.globalData.defs.appendChild(elementData.ms);
+      this.globalData.defs.appendChild(elementData.of);
+      pathElement.setAttribute('mask', 'url(' + getLocationHref() + '#' + elementData.maskId + ')');
+    }
+  } else if (data.ty === 'no') {
+    elementData = new SVGNoStyleData(this, data, styleOb);
+  }
+
+  if (data.ty === 'st' || data.ty === 'gs') {
+    pathElement.setAttribute('stroke-linecap', lineCapEnum[data.lc || 2]);
+    pathElement.setAttribute('stroke-linejoin', lineJoinEnum[data.lj || 2]);
+    pathElement.setAttribute('fill-opacity', '0');
+    if (data.lj === 1) {
+      pathElement.setAttribute('stroke-miterlimit', data.ml);
+    }
+  }
+
+  if (data.r === 2) {
+    pathElement.setAttribute('fill-rule', 'evenodd');
+  }
+
+  if (data.ln) {
+    pathElement.setAttribute('id', data.ln);
+  }
+  if (data.cl) {
+    pathElement.setAttribute('class', data.cl);
+  }
+  if (data.bm) {
+    pathElement.style['mix-blend-mode'] = getBlendMode(data.bm);
+  }
+  this.stylesList.push(styleOb);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.createGroupElement = function (data) {
+  var elementData = new ShapeGroupData();
+  if (data.ln) {
+    elementData.gr.setAttribute('id', data.ln);
+  }
+  if (data.cl) {
+    elementData.gr.setAttribute('class', data.cl);
+  }
+  if (data.bm) {
+    elementData.gr.style['mix-blend-mode'] = getBlendMode(data.bm);
+  }
+  return elementData;
+};
+
+SVGShapeElement.prototype.createTransformElement = function (data, container) {
+  var transformProperty = TransformPropertyFactory.getTransformProperty(this, data, this);
+  var elementData = new SVGTransformData(transformProperty, transformProperty.o, container);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.createShapeElement = function (data, ownTransformers, level) {
+  var ty = 4;
+  if (data.ty === 'rc') {
+    ty = 5;
+  } else if (data.ty === 'el') {
+    ty = 6;
+  } else if (data.ty === 'sr') {
+    ty = 7;
+  }
+  var shapeProperty = ShapePropertyFactory.getShapeProp(this, data, ty, this);
+  var elementData = new SVGShapeData(ownTransformers, level, shapeProperty);
+  this.shapes.push(elementData);
+  this.addShapeToModifiers(elementData);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.addToAnimatedContents = function (data, element) {
+  var i = 0;
+  var len = this.animatedContents.length;
+  while (i < len) {
+    if (this.animatedContents[i].element === element) {
+      return;
+    }
+    i += 1;
+  }
+  this.animatedContents.push({
+    fn: SVGElementsRenderer.createRenderFunction(data),
+    element: element,
+    data: data,
+  });
+};
+
+SVGShapeElement.prototype.setElementStyles = function (elementData) {
+  var arr = elementData.styles;
+  var j;
+  var jLen = this.stylesList.length;
+  for (j = 0; j < jLen; j += 1) {
+    if (!this.stylesList[j].closed) {
+      arr.push(this.stylesList[j]);
+    }
+  }
+};
+
+SVGShapeElement.prototype.reloadShapes = function () {
+  this._isFirstFrame = true;
+  var i;
+  var len = this.itemsData.length;
+  for (i = 0; i < len; i += 1) {
+    this.prevViewData[i] = this.itemsData[i];
+  }
+  this.searchShapes(this.shapesData, this.itemsData, this.prevViewData, this.layerElement, 0, [], true);
+  this.filterUniqueShapes();
+  len = this.dynamicProperties.length;
+  for (i = 0; i < len; i += 1) {
+    this.dynamicProperties[i].getValue();
+  }
+  this.renderModifiers();
+};
+
+SVGShapeElement.prototype.searchShapes = function (arr, itemsData, prevViewData, container, level, transformers, render) {
+  var ownTransformers = [].concat(transformers);
+  var i;
+  var len = arr.length - 1;
+  var j;
+  var jLen;
+  var ownStyles = [];
+  var ownModifiers = [];
+  var currentTransform;
+  var modifier;
+  var processedPos;
+  for (i = len; i >= 0; i -= 1) {
+    processedPos = this.searchProcessedElement(arr[i]);
+    if (!processedPos) {
+      arr[i]._render = render;
+    } else {
+      itemsData[i] = prevViewData[processedPos - 1];
+    }
+    if (arr[i].ty === 'fl' || arr[i].ty === 'st' || arr[i].ty === 'gf' || arr[i].ty === 'gs' || arr[i].ty === 'no') {
+      if (!processedPos) {
+        itemsData[i] = this.createStyleElement(arr[i], level);
+      } else {
+        itemsData[i].style.closed = false;
+      }
+      if (arr[i]._render) {
+        if (itemsData[i].style.pElem.parentNode !== container) {
+          container.appendChild(itemsData[i].style.pElem);
+        }
+      }
+      ownStyles.push(itemsData[i].style);
+    } else if (arr[i].ty === 'gr') {
+      if (!processedPos) {
+        itemsData[i] = this.createGroupElement(arr[i]);
+      } else {
+        jLen = itemsData[i].it.length;
+        for (j = 0; j < jLen; j += 1) {
+          itemsData[i].prevViewData[j] = itemsData[i].it[j];
+        }
+      }
+      this.searchShapes(arr[i].it, itemsData[i].it, itemsData[i].prevViewData, itemsData[i].gr, level + 1, ownTransformers, render);
+      if (arr[i]._render) {
+        if (itemsData[i].gr.parentNode !== container) {
+          container.appendChild(itemsData[i].gr);
+        }
+      }
+    } else if (arr[i].ty === 'tr') {
+      if (!processedPos) {
+        itemsData[i] = this.createTransformElement(arr[i], container);
+      }
+      currentTransform = itemsData[i].transform;
+      ownTransformers.push(currentTransform);
+    } else if (arr[i].ty === 'sh' || arr[i].ty === 'rc' || arr[i].ty === 'el' || arr[i].ty === 'sr') {
+      if (!processedPos) {
+        itemsData[i] = this.createShapeElement(arr[i], ownTransformers, level);
+      }
+      this.setElementStyles(itemsData[i]);
+    } else if (arr[i].ty === 'tm' || arr[i].ty === 'rd' || arr[i].ty === 'ms' || arr[i].ty === 'pb' || arr[i].ty === 'zz' || arr[i].ty === 'op') {
+      if (!processedPos) {
+        modifier = ShapeModifiers.getModifier(arr[i].ty);
+        modifier.init(this, arr[i]);
+        itemsData[i] = modifier;
+        this.shapeModifiers.push(modifier);
+      } else {
+        modifier = itemsData[i];
+        modifier.closed = false;
+      }
+      ownModifiers.push(modifier);
+    } else if (arr[i].ty === 'rp') {
+      if (!processedPos) {
+        modifier = ShapeModifiers.getModifier(arr[i].ty);
+        itemsData[i] = modifier;
+        modifier.init(this, arr, i, itemsData);
+        this.shapeModifiers.push(modifier);
+        render = false;
+      } else {
+        modifier = itemsData[i];
+        modifier.closed = true;
+      }
+      ownModifiers.push(modifier);
+    }
+    this.addProcessedElement(arr[i], i + 1);
+  }
+  len = ownStyles.length;
+  for (i = 0; i < len; i += 1) {
+    ownStyles[i].closed = true;
+  }
+  len = ownModifiers.length;
+  for (i = 0; i < len; i += 1) {
+    ownModifiers[i].closed = true;
+  }
+};
+
+SVGShapeElement.prototype.renderInnerContent = function () {
+  this.renderModifiers();
+  var i;
+  var len = this.stylesList.length;
+  for (i = 0; i < len; i += 1) {
+    this.stylesList[i].reset();
+  }
+  this.renderShape();
+  for (i = 0; i < len; i += 1) {
+    if (this.stylesList[i]._mdf || this._isFirstFrame) {
+      if (this.stylesList[i].msElem) {
+        this.stylesList[i].msElem.setAttribute('d', this.stylesList[i].d);
+        // Adding M0 0 fixes same mask bug on all browsers
+        this.stylesList[i].d = 'M0 0' + this.stylesList[i].d;
+      }
+      this.stylesList[i].pElem.setAttribute('d', this.stylesList[i].d || 'M0 0');
+    }
+  }
+};
+
+SVGShapeElement.prototype.renderShape = function () {
+  var i;
+  var len = this.animatedContents.length;
+  var animatedContent;
+  for (i = 0; i < len; i += 1) {
+    animatedContent = this.animatedContents[i];
+    if ((this._isFirstFrame || animatedContent.element._isAnimated) && animatedContent.data !== true) {
+      animatedContent.fn(animatedContent.data, animatedContent.element, this._isFirstFrame);
+    }
+  }
+};
+SVGShapeElement.prototype.renderShapeColor = function (color, endColor) {
+  var i;
+  var len = this.animatedContents.length;
+  var animatedContent;
+  for (i = 0; i < len; i += 1) {
+    animatedContent = this.animatedContents[i];
+    if ((this._isFirstFrame || animatedContent.element._isAnimated) && animatedContent.data !== true) {
+      if (animatedContent.element.c && (animatedContent.element.c._mdf || this._isFirstFrame)) {
+        try {
+          if (!!endColor && endColor.length > 0) {
+            if (color.length == 4) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[1] = color[1] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[2] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[1] = endColor[1] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[2] / 255.0;
+
+              animatedContent.element.o.v = color[3];
+            } else if (color.length == 3) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[1] = color[1] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[2] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[1] = endColor[1] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[2] / 255.0;
+            } else if (color.length == 2) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[1] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[1] / 255.0;
+            } else if (color.length == 1) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+            }
+          } else {
+            if (color.length == 4) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[1] = color[1];
+              animatedContent.element.c.v[2] = color[2];
+              animatedContent.element.o.v = color[3];
+            } else if (color.length == 3) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[1] = color[1];
+              animatedContent.element.c.v[2] = color[2];
+            } else if (color.length == 2) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[2] = color[1];
+            } else if (color.length == 1) {
+              animatedContent.element.c.v[0] = color[0];
+            }
+          }
+        } catch (error) {
+        }
+      } else {
+        try {
+          if (animatedContent.element.g && (animatedContent.element.g._cmdf || this._isFirstFrame)) {
+            var lens = 3;
+            var j;
+            for (j = 0; j < lens; j += 1) {
+              if (color.length >= 3) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+                animatedContent.element.g.c[j * 4 + 2] = color[1];
+                animatedContent.element.g.c[j * 4 + 3] = color[2];
+              } else if (color.length == 2) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+                animatedContent.element.g.c[j * 4 + 2] = color[1];
+              } else if (color.length == 1) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+              }
+            }
+          }
+        } catch (error) {
+        }
+      }
+    }
+  }
+};
+
+SVGShapeElement.prototype.destroy = function () {
+  this.destroyBaseElement();
+  this.shapesData = null;
+  this.itemsData = null;
+};
+
+export default SVGShapeElement;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜÃ‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘Ù©D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\svgElements\SVGShapeElement.js‘ÚB€import {
+  extendPrototype,
+} from '../../utils/functionExtensions';
+import { getLocationHref } from '../../main';
+import ShapePropertyFactory from '../../utils/shapes/ShapeProperty';
+import BaseElement from '../BaseElement';
+import TransformElement from '../helpers/TransformElement';
+import SVGBaseElement from './SVGBaseElement';
+import HierarchyElement from '../helpers/HierarchyElement';
+import FrameElement from '../helpers/FrameElement';
+import RenderableDOMElement from '../helpers/RenderableDOMElement';
+import getBlendMode from '../../utils/helpers/blendModes';
+import Matrix from '../../3rd_party/transformation-matrix';
+import IShapeElement from '../ShapeElement';
+import TransformPropertyFactory from '../../utils/TransformProperty';
+import { ShapeModifiers } from '../../utils/shapes/ShapeModifiers';
+import {
+  lineCapEnum,
+  lineJoinEnum,
+} from '../../utils/helpers/shapeEnums';
+import SVGShapeData from '../helpers/shapes/SVGShapeData';
+import SVGStyleData from '../helpers/shapes/SVGStyleData';
+import SVGStrokeStyleData from '../helpers/shapes/SVGStrokeStyleData';
+import SVGFillStyleData from '../helpers/shapes/SVGFillStyleData';
+import SVGNoStyleData from '../helpers/shapes/SVGNoStyleData';
+import SVGGradientFillStyleData from '../helpers/shapes/SVGGradientFillStyleData';
+import SVGGradientStrokeStyleData from '../helpers/shapes/SVGGradientStrokeStyleData';
+import ShapeGroupData from '../helpers/shapes/ShapeGroupData';
+import SVGTransformData from '../helpers/shapes/SVGTransformData';
+import SVGElementsRenderer from '../helpers/shapes/SVGElementsRenderer';
+
+function SVGShapeElement(data, globalData, comp) {
+  // List of drawable elements
+  this.shapes = [];
+  // Full shape data
+  this.shapesData = data.shapes;
+  // List of styles that will be applied to shapes
+  this.stylesList = [];
+  // List of modifiers that will be applied to shapes
+  this.shapeModifiers = [];
+  // List of items in shape tree
+  this.itemsData = [];
+  // List of items in previous shape tree
+  this.processedElements = [];
+  // List of animated components
+  this.animatedContents = [];
+  this.initElement(data, globalData, comp);
+  // Moving any property that doesn't get too much access after initialization because of v8 way of handling more than 10 properties.
+  // List of elements that have been created
+  this.prevViewData = [];
+  // Moving any property that doesn't get too much access after initialization because of v8 way of handling more than 10 properties.
+}
+
+extendPrototype([BaseElement, TransformElement, SVGBaseElement, IShapeElement, HierarchyElement, FrameElement, RenderableDOMElement], SVGShapeElement);
+
+SVGShapeElement.prototype.initSecondaryElement = function () {
+};
+
+SVGShapeElement.prototype.identityMatrix = new Matrix();
+
+SVGShapeElement.prototype.buildExpressionInterface = function () {};
+
+SVGShapeElement.prototype.createContent = function () {
+  this.searchShapes(this.shapesData, this.itemsData, this.prevViewData, this.layerElement, 0, [], true);
+  this.filterUniqueShapes();
+};
+
+/*
+This method searches for multiple shapes that affect a single element and one of them is animated
+*/
+SVGShapeElement.prototype.filterUniqueShapes = function () {
+  var i;
+  var len = this.shapes.length;
+  var shape;
+  var j;
+  var jLen = this.stylesList.length;
+  var style;
+  var tempShapes = [];
+  var areAnimated = false;
+  for (j = 0; j < jLen; j += 1) {
+    style = this.stylesList[j];
+    areAnimated = false;
+    tempShapes.length = 0;
+    for (i = 0; i < len; i += 1) {
+      shape = this.shapes[i];
+      if (shape.styles.indexOf(style) !== -1) {
+        tempShapes.push(shape);
+        areAnimated = shape._isAnimated || areAnimated;
+      }
+    }
+    if (tempShapes.length > 1 && areAnimated) {
+      this.setShapesAsAnimated(tempShapes);
+    }
+  }
+};
+
+SVGShapeElement.prototype.setShapesAsAnimated = function (shapes) {
+  var i;
+  var len = shapes.length;
+  for (i = 0; i < len; i += 1) {
+    shapes[i].setAsAnimated();
+  }
+};
+
+SVGShapeElement.prototype.createStyleElement = function (data, level) {
+  // TODO: prevent drawing of hidden styles
+  var elementData;
+  var styleOb = new SVGStyleData(data, level);
+
+  var pathElement = styleOb.pElem;
+  if (data.ty === 'st') {
+    elementData = new SVGStrokeStyleData(this, data, styleOb);
+  } else if (data.ty === 'fl') {
+    elementData = new SVGFillStyleData(this, data, styleOb);
+  } else if (data.ty === 'gf' || data.ty === 'gs') {
+    var GradientConstructor = data.ty === 'gf' ? SVGGradientFillStyleData : SVGGradientStrokeStyleData;
+    elementData = new GradientConstructor(this, data, styleOb);
+    this.globalData.defs.appendChild(elementData.gf);
+    if (elementData.maskId) {
+      this.globalData.defs.appendChild(elementData.ms);
+      this.globalData.defs.appendChild(elementData.of);
+      pathElement.setAttribute('mask', 'url(' + getLocationHref() + '#' + elementData.maskId + ')');
+    }
+  } else if (data.ty === 'no') {
+    elementData = new SVGNoStyleData(this, data, styleOb);
+  }
+
+  if (data.ty === 'st' || data.ty === 'gs') {
+    pathElement.setAttribute('stroke-linecap', lineCapEnum[data.lc || 2]);
+    pathElement.setAttribute('stroke-linejoin', lineJoinEnum[data.lj || 2]);
+    pathElement.setAttribute('fill-opacity', '0');
+    if (data.lj === 1) {
+      pathElement.setAttribute('stroke-miterlimit', data.ml);
+    }
+  }
+
+  if (data.r === 2) {
+    pathElement.setAttribute('fill-rule', 'evenodd');
+  }
+
+  if (data.ln) {
+    pathElement.setAttribute('id', data.ln);
+  }
+  if (data.cl) {
+    pathElement.setAttribute('class', data.cl);
+  }
+  if (data.bm) {
+    pathElement.style['mix-blend-mode'] = getBlendMode(data.bm);
+  }
+  this.stylesList.push(styleOb);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.createGroupElement = function (data) {
+  var elementData = new ShapeGroupData();
+  if (data.ln) {
+    elementData.gr.setAttribute('id', data.ln);
+  }
+  if (data.cl) {
+    elementData.gr.setAttribute('class', data.cl);
+  }
+  if (data.bm) {
+    elementData.gr.style['mix-blend-mode'] = getBlendMode(data.bm);
+  }
+  return elementData;
+};
+
+SVGShapeElement.prototype.createTransformElement = function (data, container) {
+  var transformProperty = TransformPropertyFactory.getTransformProperty(this, data, this);
+  var elementData = new SVGTransformData(transformProperty, transformProperty.o, container);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.createShapeElement = function (data, ownTransformers, level) {
+  var ty = 4;
+  if (data.ty === 'rc') {
+    ty = 5;
+  } else if (data.ty === 'el') {
+    ty = 6;
+  } else if (data.ty === 'sr') {
+    ty = 7;
+  }
+  var shapeProperty = ShapePropertyFactory.getShapeProp(this, data, ty, this);
+  var elementData = new SVGShapeData(ownTransformers, level, shapeProperty);
+  this.shapes.push(elementData);
+  this.addShapeToModifiers(elementData);
+  this.addToAnimatedContents(data, elementData);
+  return elementData;
+};
+
+SVGShapeElement.prototype.addToAnimatedContents = function (data, element) {
+  var i = 0;
+  var len = this.animatedContents.length;
+  while (i < len) {
+    if (this.animatedContents[i].element === element) {
+      return;
+    }
+    i += 1;
+  }
+  this.animatedContents.push({
+    fn: SVGElementsRenderer.createRenderFunction(data),
+    element: element,
+    data: data,
+  });
+};
+
+SVGShapeElement.prototype.setElementStyles = function (elementData) {
+  var arr = elementData.styles;
+  var j;
+  var jLen = this.stylesList.length;
+  for (j = 0; j < jLen; j += 1) {
+    if (!this.stylesList[j].closed) {
+      arr.push(this.stylesList[j]);
+    }
+  }
+};
+
+SVGShapeElement.prototype.reloadShapes = function () {
+  this._isFirstFrame = true;
+  var i;
+  var len = this.itemsData.length;
+  for (i = 0; i < len; i += 1) {
+    this.prevViewData[i] = this.itemsData[i];
+  }
+  this.searchShapes(this.shapesData, this.itemsData, this.prevViewData, this.layerElement, 0, [], true);
+  this.filterUniqueShapes();
+  len = this.dynamicProperties.length;
+  for (i = 0; i < len; i += 1) {
+    this.dynamicProperties[i].getValue();
+  }
+  this.renderModifiers();
+};
+
+SVGShapeElement.prototype.searchShapes = function (arr, itemsData, prevViewData, container, level, transformers, render) {
+  var ownTransformers = [].concat(transformers);
+  var i;
+  var len = arr.length - 1;
+  var j;
+  var jLen;
+  var ownStyles = [];
+  var ownModifiers = [];
+  var currentTransform;
+  var modifier;
+  var processedPos;
+  for (i = len; i >= 0; i -= 1) {
+    processedPos = this.searchProcessedElement(arr[i]);
+    if (!processedPos) {
+      arr[i]._render = render;
+    } else {
+      itemsData[i] = prevViewData[processedPos - 1];
+    }
+    if (arr[i].ty === 'fl' || arr[i].ty === 'st' || arr[i].ty === 'gf' || arr[i].ty === 'gs' || arr[i].ty === 'no') {
+      if (!processedPos) {
+        itemsData[i] = this.createStyleElement(arr[i], level);
+      } else {
+        itemsData[i].style.closed = false;
+      }
+      if (arr[i]._render) {
+        if (itemsData[i].style.pElem.parentNode !== container) {
+          container.appendChild(itemsData[i].style.pElem);
+        }
+      }
+      ownStyles.push(itemsData[i].style);
+    } else if (arr[i].ty === 'gr') {
+      if (!processedPos) {
+        itemsData[i] = this.createGroupElement(arr[i]);
+      } else {
+        jLen = itemsData[i].it.length;
+        for (j = 0; j < jLen; j += 1) {
+          itemsData[i].prevViewData[j] = itemsData[i].it[j];
+        }
+      }
+      this.searchShapes(arr[i].it, itemsData[i].it, itemsData[i].prevViewData, itemsData[i].gr, level + 1, ownTransformers, render);
+      if (arr[i]._render) {
+        if (itemsData[i].gr.parentNode !== container) {
+          container.appendChild(itemsData[i].gr);
+        }
+      }
+    } else if (arr[i].ty === 'tr') {
+      if (!processedPos) {
+        itemsData[i] = this.createTransformElement(arr[i], container);
+      }
+      currentTransform = itemsData[i].transform;
+      ownTransformers.push(currentTransform);
+    } else if (arr[i].ty === 'sh' || arr[i].ty === 'rc' || arr[i].ty === 'el' || arr[i].ty === 'sr') {
+      if (!processedPos) {
+        itemsData[i] = this.createShapeElement(arr[i], ownTransformers, level);
+      }
+      this.setElementStyles(itemsData[i]);
+    } else if (arr[i].ty === 'tm' || arr[i].ty === 'rd' || arr[i].ty === 'ms' || arr[i].ty === 'pb' || arr[i].ty === 'zz' || arr[i].ty === 'op') {
+      if (!processedPos) {
+        modifier = ShapeModifiers.getModifier(arr[i].ty);
+        modifier.init(this, arr[i]);
+        itemsData[i] = modifier;
+        this.shapeModifiers.push(modifier);
+      } else {
+        modifier = itemsData[i];
+        modifier.closed = false;
+      }
+      ownModifiers.push(modifier);
+    } else if (arr[i].ty === 'rp') {
+      if (!processedPos) {
+        modifier = ShapeModifiers.getModifier(arr[i].ty);
+        itemsData[i] = modifier;
+        modifier.init(this, arr, i, itemsData);
+        this.shapeModifiers.push(modifier);
+        render = false;
+      } else {
+        modifier = itemsData[i];
+        modifier.closed = true;
+      }
+      ownModifiers.push(modifier);
+    }
+    this.addProcessedElement(arr[i], i + 1);
+  }
+  len = ownStyles.length;
+  for (i = 0; i < len; i += 1) {
+    ownStyles[i].closed = true;
+  }
+  len = ownModifiers.length;
+  for (i = 0; i < len; i += 1) {
+    ownModifiers[i].closed = true;
+  }
+};
+
+SVGShapeElement.prototype.renderInnerContent = function () {
+  this.renderModifiers();
+  var i;
+  var len = this.stylesList.length;
+  for (i = 0; i < len; i += 1) {
+    this.stylesList[i].reset();
+  }
+  this.renderShape();
+  for (i = 0; i < len; i += 1) {
+    if (this.stylesList[i]._mdf || this._isFirstFrame) {
+      if (this.stylesList[i].msElem) {
+        this.stylesList[i].msElem.setAttribute('d', this.stylesList[i].d);
+        // Adding M0 0 fixes same mask bug on all browsers
+        this.stylesList[i].d = 'M0 0' + this.stylesList[i].d;
+      }
+      this.stylesList[i].pElem.setAttribute('d', this.stylesList[i].d || 'M0 0');
+    }
+  }
+};
+
+SVGShapeElement.prototype.renderShape = function () {
+  var i;
+  var len = this.animatedContents.length;
+  var animatedContent;
+  for (i = 0; i < len; i += 1) {
+    animatedContent = this.animatedContents[i];
+    if ((this._isFirstFrame || animatedContent.element._isAnimated) && animatedContent.data !== true) {
+      animatedContent.fn(animatedContent.data, animatedContent.element, this._isFirstFrame);
+    }
+  }
+};
+SVGShapeElement.prototype.renderShapeColor = function (color, endColor) {
+  var i;
+  var len = this.animatedContents.length;
+  var animatedContent;
+  for (i = 0; i < len; i += 1) {
+    animatedContent = this.animatedContents[i];
+    if ((this._isFirstFrame || animatedContent.element._isAnimated) && animatedContent.data !== true) {
+      if (animatedContent.element.c && (animatedContent.element.c._mdf || this._isFirstFrame)) {
+        try {
+          if (!!endColor && endColor.length > 0) {
+            if (color.length == 4) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[1] = color[1] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[2] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[1] = endColor[1] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[2] / 255.0;
+
+              animatedContent.element.o.v = color[3];
+            } else if (color.length == 3) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[1] = color[1] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[2] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[1] = endColor[1] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[2] / 255.0;
+            } else if (color.length == 2) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].s[2] = color[1] / 255.0;
+
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[2] = endColor[1] / 255.0;
+            } else if (color.length == 1) {
+              animatedContent.element.c.data.k[0].s[0] = color[0] / 255.0;
+              animatedContent.element.c.data.k[0].e[0] = endColor[0] / 255.0;
+            }
+          } else {
+            if (color.length == 4) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[1] = color[1];
+              animatedContent.element.c.v[2] = color[2];
+              animatedContent.element.o.v = color[3];
+            } else if (color.length == 3) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[1] = color[1];
+              animatedContent.element.c.v[2] = color[2];
+            } else if (color.length == 2) {
+              animatedContent.element.c.v[0] = color[0];
+              animatedContent.element.c.v[2] = color[1];
+            } else if (color.length == 1) {
+              animatedContent.element.c.v[0] = color[0];
+            }
+          }
+        } catch (error) {
+        }
+      } else {
+        try {
+          if (animatedContent.element.g && (animatedContent.element.g._cmdf || this._isFirstFrame)) {
+            var lens = 3;
+            var j;
+            for (j = 0; j < lens; j += 1) {
+              if (color.length >= 3) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+                animatedContent.element.g.c[j * 4 + 2] = color[1];
+                animatedContent.element.g.c[j * 4 + 3] = color[2];
+              } else if (color.length == 2) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+                animatedContent.element.g.c[j * 4 + 2] = color[1];
+              } else if (color.length == 1) {
+                animatedContent.element.g.c[j * 4] = color[0];
+                animatedContent.element.g.c[j * 4 + 1] = color[0];
+              }
+            }
+          }
+        } catch (error) {
+        }
+      }
+    }
+  }
+};
+
+SVGShapeElement.prototype.destroy = function () {
+  this.destroyBaseElement();
+  this.shapesData = null;
+  this.itemsData = null;
+};
+
+export default SVGShapeElement;
+ÔrFÜ ¾../../utils/functionExtensionsÙ ../../utils/shapes/ShapePropertyª../../main°./SVGBaseElementÙ%../../3rd_party/transformation-matrix½../../utils/TransformPropertyÙ!../../utils/shapes/ShapeModifiers®../BaseElement·../helpers/FrameElement»../helpers/TransformElement»../helpers/HierarchyElement¿../helpers/RenderableDOMElement¯../ShapeElement¾../../utils/helpers/shapeEnums¾../../utils/helpers/blendModes¾../helpers/shapes/SVGStyleDataÙ ../helpers/shapes/SVGNoStyleDataÙ"../helpers/shapes/SVGTransformDataÙ ../helpers/shapes/ShapeGroupDataÙ$../helpers/shapes/SVGStrokeStyleData¾../helpers/shapes/SVGShapeDataÙ"../helpers/shapes/SVGFillStyleDataÙ%../helpers/shapes/SVGElementsRendererÙ,../helpers/shapes/SVGGradientStrokeStyleDataÙ*../helpers/shapes/SVGGradientFillStyleDataÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeProperty.jsAÃªoh-resolveÂGAÂÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsAÃªoh-resolveÂGAÂÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\svgElements\SVGBaseElement.jsAÃªoh-resolveÂGAÂÙ¤D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\3rd_party\transformation-matrix.jsAÃªoh-resolveÂGAÂÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\TransformProperty.jsAÃªoh-resolveÂGAÂÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeModifiers.jsAÃªoh-resolveÂGAÂÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\BaseElement.jsAÃªoh-resolveÂGAÂÙ¢D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\FrameElement.jsAÃªoh-resolveÂGAÂÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\TransformElement.jsAÃªoh-resolveÂGAÂÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\HierarchyElement.jsAÃªoh-resolveÂGAÂÙªD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\RenderableDOMElement.jsAÃªoh-resolveÂGAÂÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\ShapeElement.jsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\shapeEnums.jsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\blendModes.jsAÃªoh-resolveÂGAÂÙ©D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGStyleData.jsAÃªoh-resolveÂGAÂÙ«D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGNoStyleData.jsAÃªoh-resolveÂGAÂÙ­D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGTransformData.jsAÃªoh-resolveÂGAÂÙ«D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\ShapeGroupData.jsAÃªoh-resolveÂGAÂÙ¯D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGStrokeStyleData.jsAÃªoh-resolveÂGAÂÙ©D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGShapeData.jsAÃªoh-resolveÂGAÂÙ­D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGFillStyleData.jsAÃªoh-resolveÂGAÂÙ°D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGElementsRenderer.jsAÃªoh-resolveÂGAÂÙ·D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGGradientStrokeStyleData.jsAÃªoh-resolveÂGAÂÙµD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGGradientFillStyleData.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCacheÜ ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration ÌF‘ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÔrL”¤type¥start£end¤nameªIdentifier¯extendPrototypeLªIdentifier¯extendPrototypeÔrM•¤type¥start£end¥value£raw§Literal%ÌE¾../../utils/functionExtensionsÙ '../../utils/functionExtensions'J±ImportDeclarationÌHÌu‘K¯ImportSpecifierÌQÌ`LªIdentifierÌQÌ`¯getLocationHrefLªIdentifierÌQÌ`¯getLocationHrefM§LiteralÌhÌtª../../main¬'../../main'J±ImportDeclarationÌwÌ»‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifierÌ~Ì’LªIdentifierÌ~Ì’´ShapePropertyFactoryM§LiteralÌ˜ÌºÙ ../../utils/shapes/ShapePropertyÙ"'../../utils/shapes/ShapeProperty'J±ImportDeclarationÌ½Ìæ‘N¶ImportDefaultSpecifierÌÄÌÏLªIdentifierÌÄÌÏ«BaseElementM§LiteralÌÕÌå®../BaseElement°'../BaseElement'J±ImportDeclarationÌèÍ#‘N¶ImportDefaultSpecifierÌïÌÿLªIdentifierÌïÌÿ°TransformElementM§LiteralÍÍ"»../helpers/TransformElement½'../helpers/TransformElement'J±ImportDeclarationÍ%ÍS‘N¶ImportDefaultSpecifierÍ,Í:LªIdentifierÍ,Í:®SVGBaseElementM§LiteralÍ@ÍR°./SVGBaseElement²'./SVGBaseElement'J±ImportDeclarationÍUÍ‘N¶ImportDefaultSpecifierÍ\ÍlLªIdentifierÍ\Íl°HierarchyElementM§LiteralÍrÍ»../helpers/HierarchyElement½'../helpers/HierarchyElement'J±ImportDeclarationÍ’ÍÅ‘N¶ImportDefaultSpecifierÍ™Í¥LªIdentifierÍ™Í¥¬FrameElementM§LiteralÍ«ÍÄ·../helpers/FrameElement¹'../helpers/FrameElement'J±ImportDeclarationÍÇÍ
+‘N¶ImportDefaultSpecifierÍÎÍâLªIdentifierÍÎÍâ´RenderableDOMElementM§LiteralÍèÍ	¿../helpers/RenderableDOMElementÙ!'../helpers/RenderableDOMElement'J±ImportDeclarationÍÍF‘N¶ImportDefaultSpecifierÍÍLªIdentifierÍÍ¬getBlendModeM§LiteralÍ%ÍE¾../../utils/helpers/blendModesÙ '../../utils/helpers/blendModes'J±ImportDeclarationÍHÍƒ‘N¶ImportDefaultSpecifierÍOÍULªIdentifierÍOÍU¦MatrixM§LiteralÍ[Í‚Ù%../../3rd_party/transformation-matrixÙ''../../3rd_party/transformation-matrix'J±ImportDeclarationÍ…Í±‘N¶ImportDefaultSpecifierÍŒÍ™LªIdentifierÍŒÍ™­IShapeElementM§LiteralÍŸÍ°¯../ShapeElement±'../ShapeElement'J±ImportDeclarationÍ³Íø‘N¶ImportDefaultSpecifierÍºÍÒLªIdentifierÍºÍÒ¸TransformPropertyFactoryM§LiteralÍØÍ÷½../../utils/TransformProperty¿'../../utils/TransformProperty'J±ImportDeclarationÍúÍ=‘K¯ImportSpecifierÍÍLªIdentifierÍÍ®ShapeModifiersLªIdentifierÍÍ®ShapeModifiersM§LiteralÍÍ<Ù!../../utils/shapes/ShapeModifiersÙ#'../../utils/shapes/ShapeModifiers'J±ImportDeclarationÍ?Í’’K¯ImportSpecifierÍKÍVLªIdentifierÍKÍV«lineCapEnumLªIdentifierÍKÍV«lineCapEnumK¯ImportSpecifierÍ[ÍgLªIdentifierÍ[Íg¬lineJoinEnumLªIdentifierÍ[Íg¬lineJoinEnumM§LiteralÍqÍ‘¾../../utils/helpers/shapeEnumsÙ '../../utils/helpers/shapeEnums'J±ImportDeclarationÍ”ÍÎ‘N¶ImportDefaultSpecifierÍ›Í§LªIdentifierÍ›Í§¬SVGShapeDataM§LiteralÍ­ÍÍ¾../helpers/shapes/SVGShapeDataÙ '../helpers/shapes/SVGShapeData'J±ImportDeclarationÍĞÍ
+‘N¶ImportDefaultSpecifierÍ×ÍãLªIdentifierÍ×Íã¬SVGStyleDataM§LiteralÍéÍ	¾../helpers/shapes/SVGStyleDataÙ '../helpers/shapes/SVGStyleData'J±ImportDeclarationÍÍR‘N¶ImportDefaultSpecifierÍÍ%LªIdentifierÍÍ%²SVGStrokeStyleDataM§LiteralÍ+ÍQÙ$../helpers/shapes/SVGStrokeStyleDataÙ&'../helpers/shapes/SVGStrokeStyleData'J±ImportDeclarationÍTÍ–‘N¶ImportDefaultSpecifierÍ[ÍkLªIdentifierÍ[Ík°SVGFillStyleDataM§LiteralÍqÍ•Ù"../helpers/shapes/SVGFillStyleDataÙ$'../helpers/shapes/SVGFillStyleData'J±ImportDeclarationÍ˜ÍÖ‘N¶ImportDefaultSpecifierÍŸÍ­LªIdentifierÍŸÍ­®SVGNoStyleDataM§LiteralÍ³ÍÕÙ ../helpers/shapes/SVGNoStyleDataÙ"'../helpers/shapes/SVGNoStyleData'J±ImportDeclarationÍØÍ*‘N¶ImportDefaultSpecifierÍßÍ÷LªIdentifierÍßÍ÷¸SVGGradientFillStyleDataM§LiteralÍıÍ)Ù*../helpers/shapes/SVGGradientFillStyleDataÙ,'../helpers/shapes/SVGGradientFillStyleData'J±ImportDeclarationÍ,Í‚‘N¶ImportDefaultSpecifierÍ3ÍMLªIdentifierÍ3ÍMºSVGGradientStrokeStyleDataM§LiteralÍSÍÙ,../helpers/shapes/SVGGradientStrokeStyleDataÙ.'../helpers/shapes/SVGGradientStrokeStyleData'J±ImportDeclarationÍ„ÍÂ‘N¶ImportDefaultSpecifierÍ‹Í™LªIdentifierÍ‹Í™®ShapeGroupDataM§LiteralÍŸÍÁÙ ../helpers/shapes/ShapeGroupDataÙ"'../helpers/shapes/ShapeGroupData'J±ImportDeclarationÍÄÍ‘N¶ImportDefaultSpecifierÍËÍÛLªIdentifierÍËÍÛ°SVGTransformDataM§LiteralÍáÍÙ"../helpers/shapes/SVGTransformDataÙ$'../helpers/shapes/SVGTransformData'J±ImportDeclarationÍÍP‘N¶ImportDefaultSpecifierÍÍ"LªIdentifierÍÍ"³SVGElementsRendererM§LiteralÍ(ÍOÙ%../helpers/shapes/SVGElementsRendererÙ''../helpers/shapes/SVGElementsRenderer'

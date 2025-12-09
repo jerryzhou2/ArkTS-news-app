@@ -1,0 +1,11 @@
+pkg_modules/.ohpm/@ohos+lottie@2.0.25/pkg_modules/@ohos/lottie:pkg_modules/.ohpm/@ohos+lottie@2.0.25/pkg_modules/@ohos/lottie/src/main/js/modules/full
+pkg_modules/@ohos/lottie:pkg_modules/.ohpm/@ohos+lottie@2.0.25/pkg_modules/@ohos/lottie
+pkg_modules/.ohpm/@ohos+pulltorefresh@2.1.3-rc.0/pkg_modules/@ohos/pulltorefresh:pkg_modules/.ohpm/@ohos+pulltorefresh@2.1.3-rc.0/pkg_modules/@ohos/pulltorefresh/index
+pkg_modules/@ohos/pulltorefresh:pkg_modules/.ohpm/@ohos+pulltorefresh@2.1.3-rc.0/pkg_modules/@ohos/pulltorefresh
+@system.app:@native.system.app
+@ohos.app:@native.ohos.app
+@system.router:@native.system.router
+@system.curves:@native.system.curves
+@ohos.curves:@native.ohos.curves
+@system.matrix4:@native.system.matrix4
+@ohos.matrix4:@native.ohos.matrix4

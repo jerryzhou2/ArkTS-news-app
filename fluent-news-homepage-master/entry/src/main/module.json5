@@ -34,6 +34,12 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    "querySchemes": [
+      "weixin",
+      "wxopensdk",
+      "qqopenapi",
+      "https"
+    ],
     "abilities": [
       {
         "name": "EntryAbility",
@@ -47,11 +53,22 @@
         "skills": [
           {
             "entities": [
-              "entity.system.home"
+              "entity.system.home",
+              "entity.system.browser"
             ],
             "actions": [
-              "action.system.home"
-            ]
+              "action.system.home",
+              "wxentity.action.open",
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "qqopenapi",
+                "host": "102061317",  // QQ互联AppID
+                "pathRegex": "\\b(auth|share)\\b"
+              }
+            ],
+            "domainVerify": true
           }
         ]
       }

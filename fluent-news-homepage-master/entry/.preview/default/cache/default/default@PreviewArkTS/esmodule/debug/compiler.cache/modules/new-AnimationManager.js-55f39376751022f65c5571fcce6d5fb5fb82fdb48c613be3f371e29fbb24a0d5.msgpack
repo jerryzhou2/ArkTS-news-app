@@ -1,0 +1,4465 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚßimport createTag from '../utils/helpers/html_elements';
+import AnimationItem from './AnimationItem';
+import displaySync from '@ohos.graphics.displaySync'
+import animator from '@ohos.animator';
+import fs from '@ohos.file.fs';
+import bez from '../utils/bez';
+import { LogUtil } from '../utils/LogUtil'
+import deviceInfo from '@ohos.deviceInfo';
+import { isExistNetworkAssets } from '../utils/DataUtil';
+import { unlinkSync, unlink, rmdirSync, listFileSyncs } from '../utils/FileUtil'
+
+let _nextIdInCoordinator = 0;
+const Coordinator = function() {
+    this._context2dShadows = new WeakMap();
+    this._context2dCallbacks = new WeakMap();
+    this._canvasShadows = new WeakMap();
+};
+
+Coordinator.prototype._getLogTag = function() {
+    return '<Coordinator>';
+};
+
+Coordinator.prototype._getOrCreateCanvasShadow = function(canvas) {
+    if (!canvas) {
+        return {};
+    }
+    let canvasShadow = this._canvasShadows.get(canvas);
+    if (canvasShadow) {
+        return canvasShadow;
+    }
+    canvasShadow = {
+        canvas, // G.OBJ.03 æ¨èåœ¨å¯¹è±¡å­—é¢é‡ä¸­ä½¿ç”¨æ–¹æ³•ç®€å†™å’Œå±æ€§ç®€å†™
+        status: {
+            hasArea: undefined,
+        },
+        context2dShadow: undefined,
+    };
+    this._canvasShadows.set(canvas, canvasShadow);
+
+    // ä»¥ä¸‹2ä¸ªæ¥å£æœªæ”¯æŒé“¾å¼è°ƒç”¨, æ­¤å¤„æ³¨å†Œæœ‰å¯èƒ½ä¼šè¦†ç›–æ­¤å‰å…¶å®ƒå¤„ç†é€»è¾‘æ‰€æ³¨å†Œçš„å¤„ç†é€»è¾‘. å½“ç„¶å…¶å®ƒå¤„ç†é€»è¾‘ä¹Ÿå¯èƒ½å½±å“coordinatorçš„è¡Œä¸º.
+    // åº”é¿å…ä¸åŒçš„å¤„ç†é€»è¾‘åŒæ—¶é’ˆå¯¹åŒä¸€ä¸ªcanvasèŠ‚ç‚¹è¿›è¡Œæ³¨å†Œ. æ­¤å¤„è¾“å‡ºæ—¥å¿—ä¾¿äºç»´æµ‹.
+    LogUtil.warn(`${this._getLogTag()} coordinator register canvas(${canvas.getUniqueId()}) callbacks.`);
+    canvas.commonEvent.setOnVisibleAreaApproximateChange(
+        { ratios: [0], expectedUpdateInterval: 500 },
+        this._onVisibleAreaApproximateChange.bind(this, canvas));
+
+    return canvasShadow;
+};
+
+Coordinator.prototype._isNodeAndAncestorVisible = function (node) {
+    if (!node) {
+        return false;
+    }
+
+    let isVisible = node.isVisible();
+    let parent = node.getParent();
+    while (parent && isVisible) {
+        isVisible = parent.isVisible();
+        parent = parent.getParent();
+    }
+    return isVisible;
+};
+
+Coordinator.prototype._notifyAnimationCanvasHasArea = function (animation, hasArea, context2dShadow) {
+    /*
+     * å½±å­æ•°æ®çš„æ„å»ºæ˜¯ä¾èµ–å„ç§å›è°ƒè¢«ä¾æ¬¡è°ƒç”¨ï¼Œæ‰èƒ½é€æ­¥å®Œæˆ. åœ¨è¢«æ„å»ºå‡ºæ¥ä¹‹å‰, å­˜åœ¨ canvas çŠ¶æ€æœªçŸ¥çš„æƒ…å½¢
+     */
+    if (!animation) {
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    let canvasUniqueId = canvas?.getUniqueId();
+    let _hasArea = hasArea;
+    if (_hasArea !== true && _hasArea !== false) {
+        // canvasèŠ‚ç‚¹å¯è§æ€§çŠ¶æ€æœªçŸ¥, æ­¤æ—¶canvaså¯èƒ½æ—©å·²åˆ›å»ºè¿‡, ä¹Ÿå¯èƒ½åˆšåˆšå¼€å§‹åˆ›å»º, é€šè¿‡è·å–ä¸€æ¬¡å½“å‰çŠ¶æ€è¿›è¡Œè¾…åŠ©åˆ¤æ–­
+        let isAttached = canvas?.isAttached();
+        let isVisible = this._isNodeAndAncestorVisible(canvas);
+        LogUtil.warn(`${this._getLogTag()} canvas(${canvasUniqueId}) is ${isAttached ? 'attached to' :
+            'detached from'} UItree and ${isVisible ? 'visible' : 'invisible'}`);
+        if (!isAttached || !isVisible) {
+            _hasArea = false;
+        } else if (context2dShadow.option.preferredNoArea) {
+            LogUtil.info(`${this._getLogTag()} regard canvas(${canvasUniqueId}) as no visible area.`);
+            _hasArea = false;
+        }
+    }
+
+    if (_hasArea === true || _hasArea === false) {
+        animation.onCanvasHasVisibleArea(canvasUniqueId, _hasArea);
+    } else {
+        // å³ä¾¿canvasæ˜¯åœ¨æ ‘ä¸Šä¸”visible, ä¹Ÿä¸æ„å‘³ç€èŠ‚ç‚¹æ˜¯å…·å¤‡å¯è§é¢ç§¯çš„, ä¸ºä¿æŒå‰å‘å…¼å®¹, æ­¤æ—¶ä¸å¯¹animationåšä¸»åŠ¨é€šçŸ¥
+        LogUtil.warn(`${this._getLogTag()} do NOT notify animation(${animation.animationID}) for indeterminate canvas(${canvasUniqueId}) status.`);
+    }
+};
+
+Coordinator.prototype._onVisibleAreaApproximateChange = function(canvas, isVisible) {
+    let uniqueId = canvas?.getUniqueId();
+    LogUtil.info(`${this._getLogTag()} canvas(${uniqueId}) visible area changed to ${isVisible}.`);
+    if (!canvas) {
+        return;
+    }
+    let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+    canvasShadow.status.hasArea = isVisible;
+
+    this._notifyAnimationCanvasHasArea(canvasShadow.context2dShadow?.animation, isVisible,
+        canvasShadow.context2dShadow);
+};
+
+Coordinator.prototype._onContext2dAttachedToCanvas = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    let { canvas } = context2d;
+    let canvasUniqueId = canvas?.getUniqueId();
+    let context2dShadow = this._context2dShadows.get(context2d);
+    LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow?._id}) attached to canvas(${canvasUniqueId})`);
+    if (!canvas) {
+        return;
+    }
+    let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+    canvasShadow.context2dShadow = context2dShadow;
+
+    if (context2dShadow?.canvasShadow !== canvasShadow) {
+        context2dShadow.canvasShadow = canvasShadow;
+    } else {
+        LogUtil.warn(`${this._getLogTag()} context2d(${context2dShadow?._id}) already attached to the same canvas(${canvasUniqueId}).`);
+    }
+
+    this._onVisibleAreaApproximateChange(canvasShadow.canvas, canvasShadow.status.hasArea);
+};
+
+Coordinator.prototype._onContext2dDetachedFromCanvas = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    let canvas = context2dShadow?.canvasShadow?.canvas;
+    let canvasUniqueId = canvas?.getUniqueId();
+    LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow?._id}) detached from canvas(${canvasUniqueId})`);
+
+    this._notifyAnimationCanvasHasArea(context2dShadow?.animation, false, context2dShadow);
+
+    if (canvas) {
+        let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+        if (canvasShadow) {
+            canvasShadow.context2dShadow = null;
+        }
+    }
+
+    if (context2dShadow) {
+        context2dShadow.canvasShadow = null; // null:ç¡®å®šè§£ç»‘, undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+    }
+};
+
+Coordinator.prototype._getOrCreateContext2dCallback = function (context2d) {
+    if (!context2d) {
+        return {};
+    }
+    let callbacks = this._context2dCallbacks.get(context2d);
+    if (!callbacks) {
+        // _onContext2dAttachedToCanvas éœ€è¦ä¸€ä¸ªé¢å¤–çš„context2dä½œä¸ºå‚æ•°, éœ€é€šè¿‡bindä¼ é€’è¿›å»
+        callbacks = {
+            onContext2dAttachedToCanvas: this._onContext2dAttachedToCanvas.bind(this, context2d),
+            onContext2dDetachedFromCanvas: this._onContext2dDetachedFromCanvas.bind(this, context2d),
+        };
+        this._context2dCallbacks.set(context2d, callbacks);
+    }
+    return callbacks;
+};
+
+Coordinator.prototype.setAttachedCanvasHasVisibleArea = function(context2d, hasArea) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        LogUtil.warn(`${this._getLogTag()} context2d has not yet bound to coordinator.`);
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    if (canvas) {
+        LogUtil.info(`${this._getLogTag()} fix visible area of canvas(${canvas.getUniqueId()})` +
+            ` attached to context2d(${context2dShadow._id}) to ${hasArea}`);
+        this._onVisibleAreaApproximateChange(canvas, hasArea);
+    } else {
+        LogUtil.warn(`${this._getLogTag()} context2d(${context2dShadow._id}) has no canvas attached.`);
+    }
+};
+
+Coordinator.prototype.isContext2dBoundToCoordinator = function (context2d) {
+    if (!context2d) {
+        return false;
+    }
+    return this._context2dShadows.has(context2d);
+};
+
+Coordinator.prototype.bindContext2dToCoordinator = function(context2d) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (context2dShadow) {
+        LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow._id}) already attached to coordinator.`);
+        context2dShadow.option.preferredNoArea = true;
+        return;
+    }
+    this.internalBindContext2dToCoordinator(context2d, true);
+};
+
+Coordinator.prototype.internalBindContext2dToCoordinator = function (context2d, preferredNoArea) {
+    if (deviceInfo.sdkApiVersion < 13 || !context2d?.on) {
+        // å½±å­æ•°æ®å¼ºä¾èµ–context2dçš„onæ¥å£, åªæœ‰API 13+æ‰å…·å¤‡.
+        LogUtil.error(`${this._getLogTag()} API level(${deviceInfo.sdkApiVersion}) is too low.`);
+        return;
+    }
+
+    let context2dShadow = {
+        _id: _nextIdInCoordinator++,
+        context2d,
+        option: {
+            preferredNoArea, // G.OBJ.03 æ¨èåœ¨å¯¹è±¡å­—é¢é‡ä¸­ä½¿ç”¨æ–¹æ³•ç®€å†™å’Œå±æ€§ç®€å†™
+        },
+        animation: undefined, // undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+        canvasShadow: undefined, // undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+    };
+    this._context2dShadows.set(context2d, context2dShadow);
+    LogUtil.info(`${this._getLogTag()} bind context2d(${context2dShadow._id}) to coordinator${preferredNoArea ?
+        ' with no area preferred' : ''}.`);
+
+    let callbacks = this._getOrCreateContext2dCallback(context2d);
+    context2d.on('onAttach', callbacks.onContext2dAttachedToCanvas);
+    context2d.on('onDetach', callbacks.onContext2dDetachedFromCanvas);
+
+    let { canvas } = context2d; // G.MET.11 å»ºè®®ä½¿ç”¨å‚æ•°çš„è§£æ„
+    if (canvas) {
+        /* æ­¤æ—¶context2dæœ‰ä¸€ä¸ªå…³è”åˆ°çš„canvas. å®ƒä¸context2dæœ‰å¯èƒ½æ˜¯attachedçš„, ä¹Ÿæœ‰å¯èƒ½æ˜¯æ›¾ç»attachedè¿‡ä½†åˆè¢«detachedäº†.
+         * ä¸ºé¿å…è¯¯åˆ¤é€ æˆæœ¬è¯¥æ´»åŠ¨è€Œæœªæ´»åŠ¨, æ­¤å¤„è§†å…¶ä¸ºattachedçš„canvasæ¥å¤„ç†, å¹¶åšä¸€æ¬¡å¿…è¦çš„"è¡¥è°ƒ"
+         */
+        LogUtil.warn(`${this._getLogTag()} canvas(${canvas.getUniqueId()}) indeterminate attached or not, treat it as attached.`);
+        callbacks.onContext2dAttachedToCanvas();
+    } else {
+        context2dShadow.canvasShadow = null;
+    }
+};
+
+Coordinator.prototype.unbindContext2dFromCoordinator = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    if (deviceInfo.sdkApiVersion < 13) {
+        // å½±å­æ•°æ®å¼ºä¾èµ–context2dçš„onæ¥å£, åªæœ‰API 13+æ‰å…·å¤‡.
+        LogUtil.error(`${this._getLogTag()} API level(${deviceInfo.sdkApiVersion}) is too low.`);
+        return;
+    }
+
+    let context2dShadow = this._context2dShadows.get(context2d);
+    LogUtil.info(`${this._getLogTag()} unbind context2d(${context2dShadow?._id}) from coordinator`);
+
+    if (!context2dShadow) {
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    if (canvas) {
+        // è¿™é‡Œåº”è¯¥å»è§£æ³¨å†Œcanvasä¸Šçš„å›è°ƒ, ä½†è§£æ³¨å†Œæ¥å£å­˜åœ¨bug, å†æ¬¡æ³¨å†Œæ—¶æ¥å£ä¼šå¤±æ•ˆ.
+        // è€ƒè™‘åˆ°canvasèŠ‚ç‚¹é”€æ¯æ—¶å›è°ƒè‡ªç„¶ä¼šè¢«è§£æ‰, æ•…è¿™é‡Œå¿½ç•¥ç›¸å…³çš„è§£æ³¨å†Œå¤„ç†, ç›´æ¥æ¸…ç†cache.
+        this._canvasShadows.delete(canvas);
+    }
+
+    let callbacks = this._context2dCallbacks.get(context2d);
+    if (callbacks && context2d?.off) {
+        context2d.off('onAttach', callbacks.onContext2dAttachedToCanvas);
+        context2d.off('onDetach', callbacks.onContext2dDetachedFromCanvas);
+    }
+
+    this._context2dShadows.delete(context2d);
+};
+
+Coordinator.prototype.attachAnimationToContext2d = function (context2d, animation) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        LogUtil.warn(`${this._getLogTag()} context2d must be bound to coordinator firstly. `);
+        return;
+    }
+
+    if (context2dShadow.animation === animation) {
+        LogUtil.warn(`${this._getLogTag()} animation(${animation?.animationID}) already attached to context2d(${context2dShadow._id}).`);
+        return;
+    }
+
+    context2dShadow.animation = animation;
+
+    let { canvasShadow } = context2dShadow;
+    if (canvasShadow) {
+        this._onVisibleAreaApproximateChange(canvasShadow.canvas, canvasShadow.status.hasArea);
+    }
+};
+
+Coordinator.prototype.detachAnimationFromContext2d = function (context2d) {
+    if (!context2d) {
+        return null;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        return null;
+    }
+
+    let { animation } = context2dShadow; // G.MET.11 å»ºè®®ä½¿ç”¨å‚æ•°çš„è§£æ„
+    context2dShadow.animation = null; // null:ç¡®å®šè§£ç»‘, undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+
+    return animation;
+};
+
+/**
+ * isSkipFrameByOwnéœ€è¦åœ¨åˆå§‹åŒ–æ—¶ç»™å‡º, ä¸èƒ½åœ¨è¿è¡Œæ—¶åŠ¨æ€æ”¹å˜.
+ * è‹¥è¦æ”¯æŒåŠ¨æ€æ”¹å˜, éœ€è¦åšåˆ°åŠ¨æ€å»é™¤displaysyncçš„æŠ•ç¥¨, æš‚æ— åˆé€‚æ¥å£.
+ * é”€æ¯åé‡å»ºdisplaysyncæ˜¯ä¸ªå¯é€‰é¡¹, ä½†æ¶‰åŠåˆ°å„ç§çŠ¶æ€ç®¡ç†è¿‡äºå¤æ‚.
+ * è¯¥åœºæ™¯å¹¶ä¸å¸¸è§, æ•…æš‚ä¸å®ç°.
+ **/
+const _DURATION_BY_MS_ = 20000;
+const _ALLOWABLE_ERROR_BY_MS_ = 1.5; // timestampçš„æ—¶é—´ç²¾åº¦ä¸º1ä¸ªms, æ•…è®©å®¹è®¸è¯¯å·®ç¨å¤§äºè¯¥å€¼
+const _LEAD_BY_MS_ = 5; // æå‰post frameCallback çš„æ—¶é—´, è¯¥å€¼ä¸èƒ½å¤ªå°ä»¥è‡³äºé”™è¿‡vsync, ä¹Ÿä¸å®œå¤ªå¤§å¯¼è‡´å¸§ç‡è¿‡é«˜.
+let _nextIdInLooper = 0;
+const Looper = function(uiContext, animations, playFrameCallback, isSkipFrameByOwn) {
+    this._id = _nextIdInLooper++;
+    this._uiContext = uiContext;
+    this._animations = animations;
+    this._playingAnimationsNum = 0;
+    this._looperStopped = true;
+    this._playingFrameRate = 0;
+    this._looperType = null;
+    this._displaySync = null;
+    this._frameCallback = undefined;
+    this._frameCallbackPosted = 0;
+    this._animator = null;
+    this._monotonicTimeStampInMs = 0;
+    this._lastAnimatorProgress = 0;
+    this._lastOnFrameTs = 0;
+    this._lastPlayedFrameTs = 0;
+    this._expectedFrameTs = 0;
+    this._periodByMs = 0;
+    this._playFrameCallback = playFrameCallback;
+    this._setExpectedFrameRateRangeWrapper = null;
+    this._isSkipFrameByOwn = isSkipFrameByOwn;
+    this.__performance = {
+        lastTimestamp: 0,
+        frames: 0,
+        janks: 0,
+        maxPeriod: 0,
+    };
+
+    if (isSkipFrameByOwn) {
+        if (this._initFrameCallbackLooper()) {
+            // ä¸»åŠ¨è·³å¸§æ—¶ä¼˜é€‰frameCallback
+            return;
+        }
+    }
+
+    if (this._initDisplaySyncLooper()) {
+        return;
+    }
+
+    // fallback to animator
+    this._initAnimatorLooper();
+};
+
+Looper.prototype._getLogTag = function() {
+    if (this._uiContext?.getHostContext()?.abilityInfo?.name) {
+        return `<Looper@${this._uiContext.getHostContext().abilityInfo.name}(${this._id})>`;
+    } else {
+        return `<Looper(${this._id})>`;
+    }
+};
+
+Looper.prototype._skippingFrame = function (timestamp) {
+    if (this._periodByMs === 0) {
+        return false;
+    }
+
+    let supplyingPeriod = 0;
+    if (this._lastOnFrameTs !== 0) {
+        supplyingPeriod = timestamp - this._lastOnFrameTs;
+    }
+
+    let phaseOffset = this._expectedFrameTs - timestamp;
+    if ((phaseOffset < 0 && phaseOffset > -_ALLOWABLE_ERROR_BY_MS_) ||
+        (phaseOffset > 0 && phaseOffset < _ALLOWABLE_ERROR_BY_MS_)) {
+        phaseOffset = 0; // åœ¨å®¹è®¸è¯¯å·®èŒƒå›´å†…åˆ™å¿½ç•¥åå·®
+    }
+
+    let halfPeriod = supplyingPeriod >> 1;
+    if (phaseOffset > (halfPeriod + _ALLOWABLE_ERROR_BY_MS_)) {
+        return true; // åå·®ç¦»å½“å‰vsyncè¿‡å¤§, ä¸»åŠ¨è·³è¿‡æœ¬å¸§
+    }
+
+    // è®¡ç®—ä¸‹ä¸€å¸§æ—¶é—´æˆ³. æ³¨æ„jsçš„å–æ¨¡è¿ç®—ä¸å…¶å®ƒè¯­è¨€ä¸åŒ, ä¼šå‡ºç°è´Ÿçš„ä½™æ•°
+    this._expectedFrameTs = timestamp + phaseOffset % this._periodByMs + this._periodByMs;
+
+    return false;
+};
+
+Looper.prototype._baseOnframe = function (timestamp, displaySynced) {
+    if (this._isSkipFrameByOwn && this._skippingFrame(timestamp)) {
+        return;
+    }
+
+    this._playFrameCallback(this._uiContext, timestamp, displaySynced);
+
+    this._performancePeriodically(timestamp);
+
+    this._lastPlayedFrameTs = timestamp;
+};
+
+Looper.prototype._performancePeriodically = function (timestamp) {
+    let _DURATION_ = 2_000; // heartbeat every <_DURATION_>ms elapsed
+
+    try {
+        this.__performance.frames++;
+
+        let supplyingPeriod = timestamp - this._lastPlayedFrameTs;
+        if (supplyingPeriod > this._periodByMs + _ALLOWABLE_ERROR_BY_MS_ + _ALLOWABLE_ERROR_BY_MS_) {
+            this.__performance.janks++;
+        }
+
+        if (supplyingPeriod > this.__performance.maxPeriod) {
+            this.__performance.maxPeriod = supplyingPeriod;
+        }
+
+        let elapsedMs = timestamp - this.__performance.lastTimestamp;
+        if (elapsedMs > _DURATION_) {
+            this.__performance.frames = 0;
+            this.__performance.janks = 0;
+            this.__performance.maxPeriod = 0;
+            this.__performance.lastTimestamp = timestamp;
+        }
+    } catch (e) {
+        // do nothing. performing does NOT matter
+    }
+};
+
+Looper.prototype._baseFirst = function () {
+    this._monotonicTimeStampInMs = 0;
+    this._lastPlayedFrameTs = 0;
+    this._expectedFrameTs = 0;
+};
+
+Looper.prototype._baseSetExpectedFrameRateRange = function (playingFrameRate) {
+    LogUtil.info(`${this._getLogTag()} ${this._looperType} running at ${playingFrameRate} HZ`);
+    this._periodByMs = 1000 / playingFrameRate;
+
+    if (!this._isSkipFrameByOwn) {
+        if (this._setExpectedFrameRateRangeWrapper) {
+            this._setExpectedFrameRateRangeWrapper({ min: 0, max: 120, expected: playingFrameRate });
+        } else {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} has no displaySync. no frame rate set.`);
+        }
+    } else {
+        // ä¸åšæŠ•ç¥¨, é¿å…æ‹‰ä½uiå¸§ç‡
+    }
+};
+
+Looper.prototype._initFrameCallbackLooper = function () {
+    let apiVersion = deviceInfo?.sdkApiVersion;
+    if (apiVersion >= 13 && this._uiContext) {
+        /* å°½ç®¡FrameCallbackæœºåˆ¶åœ¨API 12å·²æ”¯æŒ, ä½†ç”±äºå®ƒæ‰€ä¾èµ–çš„uiContextéœ€è¦ä»context2dæ‰€å…³è”çš„canvasèŠ‚ç‚¹ä¸­è·å–,
+         * è€ŒAPI 13åŠä»¥ä¸Šæ‰æ”¯æŒä»context2dä¸­è·å–canvasèŠ‚ç‚¹, æ•…åªèƒ½åœ¨API 13åŠä»¥ä¸Šæ‰å¯ä»¥ä½¿èƒ½frameCallback
+         */
+        this._frameCallback = {
+            onFrame: (timestamp) => {
+                this._frameCallbackPosted--; // æ¯æ¬¡è¿›å…¥å›è°ƒå‡æ„å‘³ç€æ¶ˆè´¹æ‰1æ¬¡frameCallback
+
+                if (this._looperStopped) {
+                    return;
+                }
+
+                // ç¡®ä¿æœ‰ä¸”ä»…æœ‰1ä¸ªframeCallbackè¢«poståˆ°ç®¡çº¿ä¸Š, é¿å…frameCallbackå †ç§¯
+                if (this._uiContext && this._frameCallbackPosted <= 0) {
+                    this._uiContext.postDelayedFrameCallback(this._frameCallback, this._periodByMs - _LEAD_BY_MS_);
+                    this._frameCallbackPosted++;
+                }
+
+                this._lastOnFrameTs = this._monotonicTimeStampInMs;
+                this._monotonicTimeStampInMs = Math.floor(timestamp / 1000_000);
+
+                this._baseOnframe(this._monotonicTimeStampInMs, true);
+            },
+        };
+        LogUtil.info(`${this._getLogTag()} frameCallback created.`);
+
+        this._exportApiByFrameCallback();
+
+        return true;
+    } else {
+        LogUtil.warn(`${this._getLogTag()} api version(${apiVersion}) is too low. frameCallback is disabled.`);
+    }
+
+    return false;
+};
+
+Looper.prototype._exportApiByFrameCallback = function() {
+    // å¯¼å‡ºå¤–éƒ¨å¯è°ƒç”¨æ–¹æ³•(å†…éƒ¨æ–¹æ³•ä»¥"_"å¼€å¤´)
+    this._looperType = 'frameCallback';
+
+    this.first = function () {
+        this._baseFirst();
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first`);
+    };
+
+    this.start = function () {
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} start`);
+        if (this._uiContext) {
+            if (this._frameCallbackPosted <= 0) {
+                // ä¸èƒ½æ— æ¡ä»¶post. å¦‚æœå·²æœ‰callbackè¢«posted, å†æ¬¡postä¼šé€ æˆframeCallbackå †ç§¯å¯¼è‡´é«˜å¸§ç‡
+                this._uiContext.postFrameCallback(this._frameCallback);
+                this._frameCallbackPosted++;
+            }
+            this._looperStopped = false;
+        } else {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} no uicontext, frameCallback could not work.`);
+        }
+    };
+
+    this.stop = function () {
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} stop`);
+        this._looperStopped = true;
+    };
+
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype._initDisplaySyncLooper = function () {
+    try {
+        this._displaySync = displaySync.create();
+        this._displaySync.on('frame', (frameInfo) => {
+            if (this._looperStopped) {
+                return;
+            }
+
+            this._lastOnFrameTs = this._monotonicTimeStampInMs;
+            this._monotonicTimeStampInMs = Math.floor(frameInfo.timestamp / 1000_000);
+
+            this._baseOnframe(this._monotonicTimeStampInMs, true);
+        });
+        LogUtil.info(`${this._getLogTag()} displaySync created.`);
+
+        this._exportApiByDisplaySync();
+
+        return true;
+    } catch (e) {
+        LogUtil.info(`${this._getLogTag()} no displaySync. API version(${deviceInfo?.sdkApiVersion}) may be too low: ${e.message}`);
+    }
+
+    return false;
+};
+
+Looper.prototype._exportApiByDisplaySync = function() {
+    // å¯¼å‡ºå¤–éƒ¨å¯è°ƒç”¨æ–¹æ³•(å†…éƒ¨æ–¹æ³•ä»¥"_"å¼€å¤´)
+    this._looperType = 'displaySync';
+
+    this.first = function () {
+        this._baseFirst();
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first`);
+    };
+
+    this.start = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT start cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} start`);
+        this._displaySync.start();
+        this._looperStopped = false;
+    };
+
+    this.stop = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT stop cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} stop`);
+        this._looperStopped = true;
+        this._displaySync.stop();
+    };
+
+    this._setExpectedFrameRateRangeWrapper = this._displaySync.setExpectedFrameRateRange.bind(this._displaySync);
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype._initAnimatorLooper = function () {
+    let options = {
+        duration: _DURATION_BY_MS_,
+        easing: 'linear',
+        delay: 0,
+        fill: 'forwards',
+        direction: 'normal',
+        iterations: -1,
+        begin: 0,
+        end: 1
+    };
+    this._animator = animator.create(options);
+    this._registerCallbackForAnimator();
+    LogUtil.info(`${this._getLogTag()} animator created.`);
+
+    this._exportApiByAnimator();
+
+    return true;
+};
+
+Looper.prototype._registerCallbackForAnimator = function() {
+    let sdkApiVersion = deviceInfo?.sdkApiVersion;
+
+    let oncancel = () => {
+        this._lastAnimatorProgress = 0;
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} oncancel.`);
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onCancel = oncancel;
+    } else {
+        this._animator.oncancel = oncancel;
+    }
+
+    let onfinish = () => {
+        this._lastAnimatorProgress = 0;
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} onfinish.`);
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onFinish = onfinish;
+    } else {
+        this._animator.onfinish = onfinish;
+    }
+
+    let onframe = (progress) => {
+        if (this._looperStopped) {
+            // animator.cancel -> onframe -> animator.oncancel
+            return;
+        }
+        // åœ¨æ¯ä¸€æ¬¡å¸§åŠ¨ç”»å›è°ƒæ—¶ï¼Œå¿½ç•¥ç³»ç»Ÿæ—¶é—´ï¼Œä»…ä»¥åŠ¨ç”»æ­¥è¿›æ¥è®¡ç®—ä¸‹ä¸€æ¬¡æ—¶é—´æˆ³ï¼Œé¿å…æ—¶é—´è°ƒæ•´å¼•èµ·çš„è·³å˜
+        let positiveProgress = progress - this._lastAnimatorProgress + 1;
+        let modularProgress = positiveProgress - (positiveProgress >>> 0); // é«˜æ•ˆåœ°å–å‡ºå°æ•°éƒ¨åˆ†, ç›¸å½“äºå¯¹1å–æ¨¡
+        let step = (_DURATION_BY_MS_ * modularProgress) >>> 0; // Zero-fill right shift for truncation to integer
+        if (step > 0) {
+            if (step > this._periodByMs + _ALLOWABLE_ERROR_BY_MS_ + _ALLOWABLE_ERROR_BY_MS_) {
+                let logInfo =
+                    `step(${step}) is too significant. progress(${progress
+                    }), last progress(${this._lastAnimatorProgress
+                    }), modular progress(${modularProgress
+                    })`;
+                LogUtil.warn(`${this._getLogTag()} ${this._looperType} ${logInfo}`);
+            }
+
+            this._lastOnFrameTs = this._monotonicTimeStampInMs;
+            this._monotonicTimeStampInMs += step;
+            this._lastAnimatorProgress = progress;
+
+            this._baseOnframe(this._monotonicTimeStampInMs, false);
+        }
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onFrame = onframe;
+    } else {
+        this._animator.onframe = onframe;
+    }
+};
+
+Looper.prototype._exportApiByAnimator = function() {
+    this._looperType = 'animator';
+
+    this.first = function () {
+        this._baseFirst();
+        this._lastAnimatorProgress = 0;
+        this._monotonicTimeStampInMs = Math.floor(Date.now());
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first: ${this._monotonicTimeStampInMs}`);
+    };
+
+    this.start = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT start cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} play`);
+        this._animator.play();
+        this._looperStopped = false;
+    };
+
+    this.stop = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT stop cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} cancel`);
+        this._looperStopped = true;
+        // do not call '_animator.finish' function which will further call animator.onframe causing stack overflow.
+        this._animator.cancel();
+    };
+
+    this._setExpectedFrameRateRangeWrapper = this._animator.setExpectedFrameRateRange?.bind(this._animator);
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype.onAnimationActive = function(animItem) {
+    if (animItem?.getFrameRate() > this._playingFrameRate) {
+        // æœ‰æ›´é«˜å¸§ç‡çš„åŠ¨ç”»æ´»åŠ¨ï¼Œéœ€è¦åˆ·æ–°å¸§ç‡
+        this.changeFrameRateIfNeeded();
+    }
+
+    this.addPlayingCount();
+};
+
+Looper.prototype.onAnimationIdle = function(animItem) {
+    this.subtractPlayingCount();
+
+    if (animItem?.getFrameRate() >= this._playingFrameRate) {
+        // æœ€é«˜å¸§ç‡çš„åŠ¨ç”»æš‚åœï¼Œéœ€è¦åˆ·æ–°ä¸ºç¬¬äºŒé«˜çš„å¸§ç‡å€¼
+        this.changeFrameRateIfNeeded();
+    }
+};
+
+Looper.prototype.pickMaxFrameRate = function() {
+    let maxUserFr = animationManager?.getFrameRate();
+    if (maxUserFr > 0 && maxUserFr <= 120) {
+        return maxUserFr; // user already set frame rate. so ignore content fr for better performance
+    }
+
+    let maxFrameRate = 0;
+    let len = this._animations?.length;
+    for (let i = 0; i < len; i++) {
+        let animItem = this._animations[i]?.animation;
+        let uiContext = animItem?.getUiContext();
+        if ((!uiContext || (uiContext === this._uiContext)) && !animItem?._idle) {
+            let fr = animItem?.getFrameRate();
+            LogUtil.info(`${this._getLogTag()} check fr from '${animItem?.name}(${animItem?.animationID})' with ${fr} fps.`);
+            if (fr > maxFrameRate) {
+                maxFrameRate = fr;
+            }
+        }
+    }
+    return maxFrameRate;
+};
+
+Looper.prototype.addPlayingCount = function() {
+    this._playingAnimationsNum += 1;
+    if (this._playingAnimationsNum > 0) {
+        this.activate();
+    }
+};
+
+Looper.prototype.subtractPlayingCount = function() {
+    this._playingAnimationsNum -= 1;
+    if (this._playingAnimationsNum <= 0) {
+        this._playingAnimationsNum = 0;
+        this.deactivate();
+    }
+};
+
+Looper.prototype.activate = function() {
+    if (this._playingAnimationsNum > 0 && this._looperStopped) {
+        LogUtil.info(`${this._getLogTag()} activate.`);
+        this.first();
+        this.start();
+    }
+};
+
+Looper.prototype.deactivate = function() {
+    if (!this._looperStopped) {
+        LogUtil.info(`${this._getLogTag()} deactivate`);
+        this._playingFrameRate = 0;
+        this.stop();
+    }
+};
+
+Looper.prototype.changeFrameRateIfNeeded = function() {
+    let maxFr = this.pickMaxFrameRate();
+    if (maxFr === 0) {
+        this.deactivate();
+        return;
+    }
+
+    if (maxFr !== this._playingFrameRate) {
+        if (maxFr > 0 && maxFr <= 120) {
+            this._playingFrameRate = maxFr;
+            this.setExpectedFrameRateRange(this._playingFrameRate);
+        }
+    }
+};
+
+const animationManager = (function(){
+    let moduleOb = {};
+    let registeredAnimations = [];
+    let _packageName = '';
+    let _userPlayingFrameRate = 0;
+    let _contextLoopers = new WeakMap();
+    let _coordinator = new Coordinator();
+
+    function _getLogTag() {
+        let abilityName = getContext()?.abilityInfo?.name;
+        if (abilityName && _packageName !== '') {
+            return `<Manager(${abilityName})@${_packageName}>`;
+        } else if (abilityName) {
+            return `<Manager(${abilityName})>`;
+        } else if (_packageName !== '') {
+            return `<Manager@${_packageName}>`;
+        } else {
+            return '<Manager>';
+        }
+    }
+
+    function _logFunc(funcName, name, onlyCurrentAbility, value) {
+        let valueDesc = '';
+        if (value) {
+            valueDesc = ` with (${value})`;
+        }
+        let nameDesc = 'all animations';
+        if (name) {
+            nameDesc = `animation named by '${name}'`;
+        }
+
+        let abilityDesc = 'in all abilities';
+        if (onlyCurrentAbility) {
+            abilityDesc = 'in current ability';
+        }
+
+        LogUtil.info(`${_getLogTag()} ${funcName}${valueDesc} for ${nameDesc} ${abilityDesc}`);
+    }
+
+    function _isNameMatched(animation, nameTarget) {
+        if (!nameTarget || animation?.name === nameTarget) {
+            return true;
+        }
+        return false;
+    }
+
+    function _isAbilityMatched(animation, onlyCurrentAbility) {
+        let context = getContext();
+        if (!onlyCurrentAbility || animation?.getUiContext()?.getHostContext() === context) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function _getAnimationUiContext(animation) {
+        /* å¤šabilitiesçš„æ”¯æŒéœ€è¦ä¾èµ–äºåœ¨å‡†ç¡®çš„contextä¸Šå¯åœLooper, ä½†displaysyncæ— æ³•å®Œæˆè¿™ä¸ªä½¿å‘½.
+         * æ¯æ¬¡å¯åŠ¨displaysyncæ—¶, startå‡ä¼šå°†displaysyncæŒ‚è½½åˆ°å½“å‰æ‰§è¡Œä¸Šä¸‹æ–‡çš„ç®¡çº¿ä¸­, è¿™ä¼šå¯¼è‡´å¯èƒ½æŒ‚é”™.
+         * ä¸ºæ­¤å¼•å…¥frameCallback, å®ƒèƒ½å¤Ÿæ”¯æŒå‘ç‰¹å®šçš„ç®¡çº¿ä¸Špostå›è°ƒ, ä»è€Œç¡®ä¿ä¸Šä¸‹æ–‡æ­£ç¡®.
+         * ä½†frameCallbackéœ€è¦ä¸€ä¸ªå‡†ç¡®çš„uicontext, å½“å‰å¹¶æ— æ¥å£æ”¯æŒ.
+         * æ­¤å¤„ç›´æ¥å€ŸåŠ©äº†animationæ‰€å…³è”canvasèŠ‚ç‚¹çš„uiContext_, è¿™æœ‰ç‚¹ç±»ä¼¼javaä¸­çš„åå°„, å±äºä¸è§„èŒƒçš„åšæ³•.
+         * FIXME:å¾…åç»­æœ‰æ­£å¼æ¥å£æ—¶éœ€åšä¸‹è°ƒæ•´.
+         * (å¼•å…¥frameCallbackçš„å¦ä¸€ä¸ªå¥½å¤„æ˜¯å¯ä»¥é™ä½è´Ÿè½½, uiçº¿ç¨‹åªåœ¨å¿…è¦æ—¶æ‰è¢«å”¤é†’)
+         */
+        return animation?.wrapper?.canvas?.uiContext_;
+    }
+
+    function _getAllLooperFromAnimations() {
+        let allLooper = new Map();
+        let len = registeredAnimations?.length;
+        for (let i = len - 1; i >= 0; i--) {
+            let context = _getAnimationUiContext(registeredAnimations[i]?.animation)?.getHostContext();
+            if (context) {
+                let looper = _contextLoopers.get(context);
+                if (looper) {
+                    allLooper.set(looper, looper);
+                }
+            }
+        }
+
+        return allLooper;
+    }
+
+    function _getLooperFromAnimation(animation) {
+        let uiContext = _getAnimationUiContext(animation);
+        if (!uiContext) {
+            LogUtil.warn(`${_getLogTag()} could NOT get current uiContext. no looper created.`);
+            return null;
+        }
+
+        return _getOrCreateLooper(uiContext);
+    }
+
+    function _getOrCreateLooper(uiContext) {
+        let looper = _contextLoopers.get(uiContext);
+        if (!!looper) {
+            return looper;
+        }
+
+        looper = new Looper(uiContext, registeredAnimations, resume, true);
+        _contextLoopers.set(uiContext, looper);
+        return looper;
+    }
+
+    // web only
+    function registerAnimation(element, animationData) {
+        if (!element) {
+            return null;
+        }
+
+        let len = registeredAnimations?.length
+        for (let i = 0; i < len; i++) {
+            if (registeredAnimations[i]?.elem !== null && registeredAnimations[i]?.elem === element) {
+                return registeredAnimations[i]?.animation;
+            }
+        }
+
+        var animItem = new AnimationItem();
+        setupAnimation(animItem, element);
+        animItem.setData(element, animationData);
+        return animItem;
+    }
+
+    // web only
+    function getRegisteredAnimations() {
+        var animations = [];
+        let len = registeredAnimations?.length;
+        for (let i = 0; i < len; i += 1) {
+            animations.push(registeredAnimations[i]?.animation);
+        }
+        return animations;
+    }
+
+    function onAnimationItemLoaded(animItem) {
+        if (!!animItem.getUiContext()) {
+            LogUtil.info(`${animItem._getLogTag()} created with ${animItem.frameRate} fps.`);
+        } else {
+            LogUtil.warn(`${animItem._getLogTag()} created with ${animItem.frameRate} fps. no UIContext.`);
+        }
+    }
+
+    function onAnimationItemDestroy(ev) {
+        let animItem = ev.target;
+        let len = registeredAnimations?.length
+        for (let i = len - 1; i >= 0; i--) {
+            if (registeredAnimations[i]?.animation === animItem) {
+                registeredAnimations[i].animation = null;
+                registeredAnimations.splice(i, 1);
+                _coordinator.detachAnimationFromContext2d(animItem?.wrapper);
+                LogUtil.info(`${animItem._getLogTag()} destroyed with ${animItem.frameRate} fps`);
+            }
+        }
+    }
+
+    function onAnimationItemActive(animItem) {
+        if (!!animItem?.getUiContext()) {
+            LogUtil.info(`${animItem?._getLogTag()} activated with ${animItem?.getFrameRate()} fps.`);
+        } else {
+            LogUtil.warn(`${animItem?._getLogTag()} activated with ${animItem?.getFrameRate()} fps. no UiContext.`);
+        }
+
+        _getLooperFromAnimation(animItem)?.onAnimationActive(animItem);
+    }
+
+    function onAnimationItemIdle(animItem) {
+        if (!!animItem?.getUiContext()) {
+            LogUtil.info(`${animItem?._getLogTag()} deactivated with ${animItem?.getFrameRate()} fps`);
+        } else {
+            LogUtil.warn(`${animItem?._getLogTag()} deactivated with ${animItem?.getFrameRate()} fps. no UiContext.`);
+        }
+
+        _getLooperFromAnimation(animItem)?.onAnimationIdle(animItem);
+    }
+
+    function _destroyAnimationWithSameContext2d(context2d) {
+        let len = registeredAnimations?.length;
+        for (let i = len - 1; i >= 0; i--) {
+            let animation = registeredAnimations[i]?.animation;
+            if (animation?.wrapper === context2d) {
+                LogUtil.warn(`${_getLogTag()} destroy animation '${animation.name}(${animation?.animationID})' from ${animation?.source},
+          because animation using the same context2D. `);
+                registeredAnimations.splice(i, 1);
+                animation?.destroy();
+            }
+        }
+    }
+
+    function setupAnimation(animItem, element) {
+        animItem.addEventListener('destroy', onAnimationItemDestroy);
+        animItem.addEventListener('_active', onAnimationItemActive);
+        animItem.addEventListener('_idle', onAnimationItemIdle);
+        animItem.addEventListener('DOMLoaded', onAnimationItemLoaded);
+        registeredAnimations.push({ elem: element, animation: animItem });
+    }
+
+    function loadAnimation(params) {
+        LogUtil.info(`${_getLogTag()} load animation named '${params.name ? params.name : ''}'` +
+            `${params.uri ? ' from ' + params.uri : (params.path ? ' from ' + params.path : '')}` +
+            `, canvas uniqueId is: ${params.container?.canvas?.getUniqueId()}`);
+        LogUtil.version();
+        let context2d = params.wrapper || params.container;
+        if (!context2d) {
+            LogUtil.warn(`${_getLogTag()} loadAnimation failed because no container`);
+            return null;
+        }
+
+        let animItem = _coordinator.detachAnimationFromContext2d(context2d);
+        if (animItem) {
+            LogUtil.warn(`${_getLogTag()} destroy animation '${animItem.name}(${animItem.animationID})' in the context2d. from ${animItem.source}`);
+            animItem.destroy();
+        } else {
+            _destroyAnimationWithSameContext2d(context2d);
+        }
+
+        animItem = new AnimationItem();
+        if (!_coordinator.isContext2dBoundToCoordinator(context2d)) {
+            /* æ‰§è¡Œ loadAnimation æ—¶è¿˜æœªå°† context2d ç»‘å®šåˆ° coordinator ä¸Š, å³ç”¨æˆ·å°šæœªæ˜¾å¼è°ƒç”¨bindContext2dToCoordinator
+             * è¯´æ˜ç”¨æˆ·è¿˜å¤„åœ¨æ—§çš„å¤„ç†é€»è¾‘ä¸­, éœ€è¦å¸®ç”¨æˆ·åšä¸€æ¬¡è°ƒç”¨
+             * å‡ºäºå…¼å®¹æ€§è€ƒè™‘, æ­¤æ—¶éœ€ä¿æŒ preferredNoArea ä¸º false, å³é»˜è®¤ canvas æœ‰å¯è§é¢ç§¯
+             */
+            _coordinator.internalBindContext2dToCoordinator(context2d, false);
+        }
+        _coordinator.attachAnimationToContext2d(context2d, animItem);
+
+        setupAnimation(animItem, null);
+        animItem.setParams(params);
+        return animItem;
+    }
+
+    function setSpeed(val, animationName, onlyCurrentAbility) {
+        _logFunc('setSpeed', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setSpeed(val);
+            }
+        }
+    }
+
+    function setDirection(val, animationName, onlyCurrentAbility) {
+        _logFunc('setDirection', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setDirection(val);
+            }
+        }
+    }
+
+    function play(animationName, onlyCurrentAbility) {
+        _logFunc('play', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.play();
+            }
+        }
+    }
+
+    function resume(uiContext, timestamp, displaySynced) {
+        let len = registeredAnimations.length;
+
+        for (let i = 0; i < len; i += 1) {
+            if (!uiContext || registeredAnimations[i]?.animation.getUiContext() === uiContext) {
+                registeredAnimations[i]?.animation.resume(timestamp, displaySynced);
+            }
+        }
+    }
+
+    function pause(animationName, onlyCurrentAbility) {
+        _logFunc('pause', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.pause();
+            }
+        }
+    }
+
+    function goToAndStop(value, isFrame, animationName, onlyCurrentAbility) {
+        _logFunc('goToAndStop', animationName, onlyCurrentAbility, `${value},${isFrame}`);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.goToAndStop(value, isFrame);
+            }
+        }
+    }
+
+    function goToAndPlay(value, isFrame, animationName, onlyCurrentAbility) {
+        _logFunc('goToAndPlay', animationName, onlyCurrentAbility, `${value},${isFrame}`);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.goToAndPlay(value, isFrame);
+            }
+        }
+    }
+
+    function stop(animationName, onlyCurrentAbility) {
+        _logFunc('stop', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.stop();
+            }
+        }
+    }
+
+    function togglePause(animationName, onlyCurrentAbility) {
+        _logFunc('togglePause', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.togglePause();
+            }
+        }
+    }
+
+    /**
+     * è®¾ç½®packageName
+     * @param name åº”ç”¨çš„åŒ…å
+     */
+    function setPackageName(name) {
+        LogUtil.info(`${_getLogTag()} setPackageName: ${name}`);
+        _packageName = name;
+    }
+
+    /**
+     * è®¾ç½®æ‰€æœ‰åŠ¨ç”»çš„æ’­æ”¾å¸§ç‡
+     * @param frameRate å¸§ç‡
+     */
+    function setFrameRate(frameRate) {
+        LogUtil.info(`${_getLogTag()} setFrameRate: ${frameRate}`);
+        _userPlayingFrameRate = frameRate;
+
+        _getAllLooperFromAnimations()?.forEach((looper) => {
+            looper.changeFrameRateIfNeeded();
+        });
+    }
+
+    /**
+     * è·å–å½“å‰æ‰€æœ‰åŠ¨ç”»çš„æ’­æ”¾å¸§ç‡
+     * @returns å¸§ç‡
+     */
+    function getFrameRate() {
+        return _userPlayingFrameRate;
+    }
+
+    function destroy(animationName, onlyCurrentAbility) {
+        _logFunc('destroy', animationName, onlyCurrentAbility);
+        LogUtil.version();
+
+        let len = registeredAnimations.length;
+        for (let i = (len - 1); i >= 0; i -= 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                // æ‰¾åˆ°å³å°†è¦è¢«destroyçš„åŠ¨ç”»ï¼Œé”€æ¯ä¹‹ã€‚ä¼šè§¦å‘å›è°ƒï¼Œåœ¨å›è°ƒä¸­è¿›è¡ŒçŠ¶æ€æ¸…ç†
+                registeredAnimations[i]?.animation.destroy();
+            }
+        }
+        if (registeredAnimations.length === 0) {
+            bez.storedData = {};
+        }
+    }
+
+    // html only
+    function searchAnimations(animationData, standalone, renderer) {
+        if (!document) {
+            return;
+        }
+        let animElements = [].concat([].slice.call(document.getElementsByClassName('lottie')),
+            [].slice.call(document.getElementsByClassName('bodymovin')));
+        let lenAnims = animElements.length;
+        for (let i = 0; i < lenAnims; i += 1) {
+            if (renderer && !!animElements[i]) {
+                animElements[i].setAttribute('data-bm-type', renderer);
+            }
+            registerAnimation(animElements[i], animationData);
+        }
+        if (standalone && lenAnims === 0) {
+            if (!renderer) {
+                renderer = 'svg';
+            }
+            var body = document.getElementsByTagName('body')[0];
+            body.innerText = '';
+            var div = createTag('div');
+            div.style.width = '100%';
+            div.style.height = '100%';
+            div.setAttribute('data-bm-type', renderer);
+            body.appendChild(div);
+            registerAnimation(div, animationData);
+        }
+    }
+
+    function setContentMode(contentMode, animationName, onlyCurrentAbility) {
+        _logFunc('setContentMode', animationName, onlyCurrentAbility, contentMode);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setContentMode(contentMode);
+            }
+        }
+    }
+
+    function resize(width, height, animationName, onlyCurrentAbility) {
+        _logFunc('resize', animationName, onlyCurrentAbility, `${width} x ${height}`);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.resize(width, height);
+            }
+        }
+    }
+
+    function freeze(animationName, onlyCurrentAbility) {
+        _logFunc('freeze', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i].animation.pause();
+            }
+        }
+    }
+
+    function unfreeze(animationName, onlyCurrentAbility) {
+        _logFunc('unfreeze', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i].animation.play();
+            }
+        }
+    }
+
+    function setVolume(val, animationName, onlyCurrentAbility) {
+        _logFunc('setVolume', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setVolume(val);
+            }
+        }
+    }
+
+    function mute(animationName, onlyCurrentAbility) {
+        _logFunc('mute', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.mute();
+            }
+        }
+    }
+
+    function unmute(animationName, onlyCurrentAbility) {
+        _logFunc('unmute', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.unmute();
+            }
+        }
+    }
+
+    /**
+     * æ¸…é™¤å•ä¸ªæ–‡ä»¶ç¼“å­˜ï¼ˆæ”¯æŒåŒæ­¥/å¼‚æ­¥æ¨¡å¼ï¼‰
+     * @param {string} path - æ–‡ä»¶è·¯å¾„ï¼ˆæ”¯æŒHTTP URLæ ¼å¼ï¼‰
+     * @param {Object} container - åŒ…å«JSONæ•°æ®çš„å®¹å™¨å¯¹è±¡
+     * @param {boolean} isSync - æ˜¯å¦ä½¿ç”¨åŒæ­¥æ¨¡å¼æ“ä½œ
+     */
+    function clearSingleFileCache(path, container, isSync) {
+        // å®‰å…¨æ ¡éªŒï¼šç¡®ä¿ä¸Šä¸‹æ–‡å­˜åœ¨
+        let context = getContext();
+        if (!context) {
+            return;
+        }
+
+        // å¤„ç†HTTPèµ„æºè·¯å¾„
+        if (path.startsWith('http')) {
+            let pathSegments = path.split('/');
+            let parentDirName = pathSegments[pathSegments.length - 2]; // çˆ¶çº§ç›®å½•å
+            let originalFileName = pathSegments[pathSegments.length - 1]; // åŸå§‹æ–‡ä»¶åï¼ˆå«æ‰©å±•åï¼‰
+            let cleanFileName = originalFileName.replace(/\.(?:zip|json)$/i, ''); // æ¸…ç†åæ–‡ä»¶åï¼ˆå»é™¤æ‰©å±•åï¼‰
+
+            let lottieBaseDir = `${context.filesDir}/lottie/${parentDirName}`; // åŸºç¡€å­˜å‚¨ç›®å½•
+            let targetDirectory = `${lottieBaseDir}/${cleanFileName}`; // ç›®æ ‡ç›®å½•
+
+            // æ‰§è¡Œç›®å½•æ¸…ç†
+            rmdir(targetDirectory, isSync);
+        }
+
+        // å¤„ç†å›¾ç‰‡èµ„æº
+        if (container) {
+            try {
+                // è§£æèµ„æºä¸­çš„JSONæ•°æ®
+                let jsonString = container.getJsonData(path);
+                let jsonObj = JSON.parse(jsonString);
+
+                // æ„å»ºå›¾ç‰‡åŠ è½½ç›®å½•è·¯å¾„
+                let loadPath = `${context.filesDir}/lottie/loadImages/`;
+
+                // æ£€æŸ¥æ˜¯å¦å­˜åœ¨ç½‘ç»œèµ„æº
+                if (isExistNetworkAssets(jsonObj?.assets)) {
+                    rmdir(loadPath, isSync, jsonObj);
+                }
+            } catch (error) {
+                LogUtil.error(`JSONè§£æå¤±è´¥: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * å¼‚æ­¥æ¸…é™¤æ–‡ä»¶ç¼“å­˜
+     * @param {string} url - è¦æ¸…é™¤ç¼“å­˜çš„æ–‡ä»¶URLæˆ–æœ¬åœ°è·¯å¾„
+     * @param {Object|string} container - ç¼“å­˜å®¹å™¨å¯¹è±¡æˆ–ç›®å½•è·¯å¾„
+     */
+    function clearFileCache(url, container) {
+        clearFile(url, container, false);
+    }
+
+    /**
+     * åŒæ­¥æ¸…é™¤æ–‡ä»¶ç¼“å­˜
+     * @param {string} url - è¦æ¸…é™¤ç¼“å­˜çš„æ–‡ä»¶URLæˆ–æœ¬åœ°è·¯å¾„
+     * @param {Object|string} container - ç¼“å­˜å®¹å™¨å¯¹è±¡æˆ–ç›®å½•è·¯å¾„
+     */
+    function clearFileCacheSync(url, container) {
+        clearFile(url, container, true);
+    }
+
+    /**
+     * æ¸…ç†æ–‡ä»¶ç¼“å­˜ï¼ˆæ”¯æŒå•æ–‡ä»¶æˆ–å…¨å±€æ¸…ç†ï¼‰
+     * @param {string} [url] - å¯é€‰çš„æ–‡ä»¶URLè·¯å¾„ï¼Œå­˜åœ¨æ—¶æ¸…ç†æŒ‡å®šæ–‡ä»¶ç¼“å­˜
+     * @param {Object} container - åŒ…å«JSONæ•°æ®çš„å®¹å™¨å¯¹è±¡ï¼Œç”¨äºè§£æå…³è”èµ„æº
+     * @param {boolean} isSync - æ˜¯å¦ä½¿ç”¨åŒæ­¥æ¨¡å¼æ‰§è¡Œæ¸…ç†æ“ä½œ
+     */
+    function clearFile(url, container, isSync) {
+        // å®‰å…¨æ ¡éªŒï¼šç¡®ä¿ä¸Šä¸‹æ–‡å­˜åœ¨
+        let context = getContext();
+        if (!context) {
+            return;
+        }
+
+        if (url) {
+            // å•æ–‡ä»¶æ¸…ç†æ¨¡å¼ï¼šç²¾ç¡®æ¸…ç†æŒ‡å®šURLå¯¹åº”çš„ç¼“å­˜
+            clearSingleFileCache(url, container, isSync);
+            return;
+        }
+        let fileDir = `${context.filesDir}/lottie`; // åº”ç”¨ç§æœ‰æ–‡ä»¶ç›®å½•
+        let cacheDir = `${context.cacheDir}/lottie`; // ç³»ç»Ÿç¼“å­˜ç›®å½•
+
+        // æ‰§è¡Œæ¸…ç†æ“ä½œï¼ˆåŒæ­¥/å¼‚æ­¥æ¨¡å¼ï¼‰
+        rmdir(fileDir, isSync);
+        rmdir(cacheDir, isSync);
+    }
+
+    /**
+     * åˆ é™¤æŒ‡å®šèµ„æºæ–‡ä»¶
+     * @param {string} path - åŸºç¡€ç›®å½•è·¯å¾„
+     * @param {Object} assets - èµ„æºå¯¹è±¡ï¼ŒåŒ…å«idå’Œp(è·¯å¾„)å±æ€§
+     * @param {Array} filenames - æ–‡ä»¶åæ•°ç»„
+     * @param {boolean} isSync - æ˜¯å¦åŒæ­¥åˆ é™¤æ ‡å¿—
+     */
+    function rmAssetsDir(path, assets, filenames, isSync) {
+        // åˆ¤æ–­æ˜¯å¦ä¸ºHTTPèµ„æºï¼ˆé€šè¿‡æ£€æŸ¥è·¯å¾„æ˜¯å¦ä»¥httpå¼€å¤´ï¼‰
+        let isHttp = assets?.p?.startsWith('http');
+
+        if (isHttp) {
+            // æ„é€ ç›®æ ‡æ–‡ä»¶åï¼ˆassets.id + '.png'ï¼‰
+            const targetFilename = `${assets.id}.png`;
+            const fileIndex = filenames.indexOf(targetFilename);
+
+            // æ‰¾åˆ°åŒ¹é…æ–‡ä»¶æ—¶æ‰§è¡Œåˆ é™¤
+            if (fileIndex !== -1) {
+                if (isSync) {
+                    unlinkSync(path + filenames[fileIndex]);
+                } else {
+                    unlink(path + filenames[fileIndex]);
+                }
+            }
+        }
+    }
+
+    /**
+     * æ ¹æ®è·¯å¾„åˆ é™¤æ–‡ä»¶æˆ–ç›®å½•
+     * @param {string} path - åŸºç¡€ç›®å½•è·¯å¾„
+     * @param {string} filename - æ–‡ä»¶/ç›®å½•å
+     * @param {boolean} isSync - æ˜¯å¦åŒæ­¥æ“ä½œæ ‡å¿—
+     */
+    function rmDirByPath(path, filename, isSync) {
+        let dirPath = path + '/' + filename;
+        // åˆ¤æ–­æ˜¯å¦æ–‡ä»¶å¤¹
+        try {
+            let isDirectory = fs.statSync(dirPath).isDirectory();
+            if (isDirectory) {
+                rmdirSync(dirPath);
+            } else {
+                if (isSync) {
+                    unlinkSync(dirPath);
+                } else {
+                    unlink(dirPath);
+                }
+            }
+        } catch (err) {
+            LogUtil.error('Method rmDirByPath execute error: ' + JSON.stringify(err));
+        }
+    }
+
+    /**
+     *  åˆ é™¤ç›®å½•
+     * @param path - ç›®æ ‡æ ¹ç›®å½•è·¯å¾„
+     * @param isSync - æ˜¯å¦åŒæ­¥æ“ä½œæ ‡å¿—
+     * @param jsonObj - èµ„æºæè¿°å¯¹è±¡ï¼ˆå¯é€‰ï¼‰
+     */
+    function rmdir(path, isSync, jsonObj) {
+        let filenames = listFileSyncs(path);
+        if (jsonObj) {
+            for (let i = 0; i < jsonObj.assets.length; i++) {
+                rmAssetsDir(path, jsonObj.assets[i], filenames, isSync);
+            }
+        } else {
+            for (let i = 0; i < filenames.length; i++) {
+                rmDirByPath(path, filenames[i], isSync);
+            }
+        }
+    }
+
+    moduleOb.registerAnimation = registerAnimation;
+    moduleOb.loadAnimation = loadAnimation;
+    moduleOb.setSpeed = setSpeed;
+    moduleOb.setDirection = setDirection;
+    moduleOb.play = play;
+    moduleOb.pause = pause;
+    moduleOb.stop = stop;
+    moduleOb.togglePause = togglePause;
+    moduleOb.searchAnimations = searchAnimations;
+    moduleOb.resize = resize;
+    moduleOb.clearFileCache = clearFileCache;
+    moduleOb.clearFileCacheSync = clearFileCacheSync;
+    moduleOb.goToAndStop = goToAndStop;
+    moduleOb.goToAndPlay = goToAndPlay;
+    moduleOb.destroy = destroy;
+    moduleOb.freeze = freeze;
+    moduleOb.unfreeze = unfreeze;
+    moduleOb.setVolume = setVolume;
+    moduleOb.mute = mute;
+    moduleOb.unmute = unmute;
+    moduleOb.getRegisteredAnimations = getRegisteredAnimations;
+    moduleOb.setPackageName = setPackageName;
+    moduleOb.setContentMode = setContentMode;
+    moduleOb.setFrameRate = setFrameRate;
+    moduleOb.getFrameRate = getFrameRate;
+    moduleOb.bindContext2dToCoordinator = _coordinator.bindContext2dToCoordinator.bind(_coordinator);
+    moduleOb.unbindContext2dFromCoordinator = _coordinator.unbindContext2dFromCoordinator.bind(_coordinator);
+    moduleOb.setAttachedCanvasHasVisibleArea = _coordinator.setAttachedCanvasHasVisibleArea.bind(_coordinator);
+
+    return moduleOb;
+}());
+
+export default animationManager;
+ÂšÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\html_elements.jsÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationItem.jsÙ_ hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.graphics.displaySync.d.tsÙS hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.animator.d.tsÙR hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.file.fs.d.tsÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\bez.jsÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsÙU hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.deviceInfo.d.tsÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\FileUtil.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationManager.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚßimport createTag from '../utils/helpers/html_elements';
+import AnimationItem from './AnimationItem';
+import displaySync from '@ohos.graphics.displaySync'
+import animator from '@ohos.animator';
+import fs from '@ohos.file.fs';
+import bez from '../utils/bez';
+import { LogUtil } from '../utils/LogUtil'
+import deviceInfo from '@ohos.deviceInfo';
+import { isExistNetworkAssets } from '../utils/DataUtil';
+import { unlinkSync, unlink, rmdirSync, listFileSyncs } from '../utils/FileUtil'
+
+let _nextIdInCoordinator = 0;
+const Coordinator = function() {
+    this._context2dShadows = new WeakMap();
+    this._context2dCallbacks = new WeakMap();
+    this._canvasShadows = new WeakMap();
+};
+
+Coordinator.prototype._getLogTag = function() {
+    return '<Coordinator>';
+};
+
+Coordinator.prototype._getOrCreateCanvasShadow = function(canvas) {
+    if (!canvas) {
+        return {};
+    }
+    let canvasShadow = this._canvasShadows.get(canvas);
+    if (canvasShadow) {
+        return canvasShadow;
+    }
+    canvasShadow = {
+        canvas, // G.OBJ.03 æ¨èåœ¨å¯¹è±¡å­—é¢é‡ä¸­ä½¿ç”¨æ–¹æ³•ç®€å†™å’Œå±æ€§ç®€å†™
+        status: {
+            hasArea: undefined,
+        },
+        context2dShadow: undefined,
+    };
+    this._canvasShadows.set(canvas, canvasShadow);
+
+    // ä»¥ä¸‹2ä¸ªæ¥å£æœªæ”¯æŒé“¾å¼è°ƒç”¨, æ­¤å¤„æ³¨å†Œæœ‰å¯èƒ½ä¼šè¦†ç›–æ­¤å‰å…¶å®ƒå¤„ç†é€»è¾‘æ‰€æ³¨å†Œçš„å¤„ç†é€»è¾‘. å½“ç„¶å…¶å®ƒå¤„ç†é€»è¾‘ä¹Ÿå¯èƒ½å½±å“coordinatorçš„è¡Œä¸º.
+    // åº”é¿å…ä¸åŒçš„å¤„ç†é€»è¾‘åŒæ—¶é’ˆå¯¹åŒä¸€ä¸ªcanvasèŠ‚ç‚¹è¿›è¡Œæ³¨å†Œ. æ­¤å¤„è¾“å‡ºæ—¥å¿—ä¾¿äºç»´æµ‹.
+    LogUtil.warn(`${this._getLogTag()} coordinator register canvas(${canvas.getUniqueId()}) callbacks.`);
+    canvas.commonEvent.setOnVisibleAreaApproximateChange(
+        { ratios: [0], expectedUpdateInterval: 500 },
+        this._onVisibleAreaApproximateChange.bind(this, canvas));
+
+    return canvasShadow;
+};
+
+Coordinator.prototype._isNodeAndAncestorVisible = function (node) {
+    if (!node) {
+        return false;
+    }
+
+    let isVisible = node.isVisible();
+    let parent = node.getParent();
+    while (parent && isVisible) {
+        isVisible = parent.isVisible();
+        parent = parent.getParent();
+    }
+    return isVisible;
+};
+
+Coordinator.prototype._notifyAnimationCanvasHasArea = function (animation, hasArea, context2dShadow) {
+    /*
+     * å½±å­æ•°æ®çš„æ„å»ºæ˜¯ä¾èµ–å„ç§å›è°ƒè¢«ä¾æ¬¡è°ƒç”¨ï¼Œæ‰èƒ½é€æ­¥å®Œæˆ. åœ¨è¢«æ„å»ºå‡ºæ¥ä¹‹å‰, å­˜åœ¨ canvas çŠ¶æ€æœªçŸ¥çš„æƒ…å½¢
+     */
+    if (!animation) {
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    let canvasUniqueId = canvas?.getUniqueId();
+    let _hasArea = hasArea;
+    if (_hasArea !== true && _hasArea !== false) {
+        // canvasèŠ‚ç‚¹å¯è§æ€§çŠ¶æ€æœªçŸ¥, æ­¤æ—¶canvaså¯èƒ½æ—©å·²åˆ›å»ºè¿‡, ä¹Ÿå¯èƒ½åˆšåˆšå¼€å§‹åˆ›å»º, é€šè¿‡è·å–ä¸€æ¬¡å½“å‰çŠ¶æ€è¿›è¡Œè¾…åŠ©åˆ¤æ–­
+        let isAttached = canvas?.isAttached();
+        let isVisible = this._isNodeAndAncestorVisible(canvas);
+        LogUtil.warn(`${this._getLogTag()} canvas(${canvasUniqueId}) is ${isAttached ? 'attached to' :
+            'detached from'} UItree and ${isVisible ? 'visible' : 'invisible'}`);
+        if (!isAttached || !isVisible) {
+            _hasArea = false;
+        } else if (context2dShadow.option.preferredNoArea) {
+            LogUtil.info(`${this._getLogTag()} regard canvas(${canvasUniqueId}) as no visible area.`);
+            _hasArea = false;
+        }
+    }
+
+    if (_hasArea === true || _hasArea === false) {
+        animation.onCanvasHasVisibleArea(canvasUniqueId, _hasArea);
+    } else {
+        // å³ä¾¿canvasæ˜¯åœ¨æ ‘ä¸Šä¸”visible, ä¹Ÿä¸æ„å‘³ç€èŠ‚ç‚¹æ˜¯å…·å¤‡å¯è§é¢ç§¯çš„, ä¸ºä¿æŒå‰å‘å…¼å®¹, æ­¤æ—¶ä¸å¯¹animationåšä¸»åŠ¨é€šçŸ¥
+        LogUtil.warn(`${this._getLogTag()} do NOT notify animation(${animation.animationID}) for indeterminate canvas(${canvasUniqueId}) status.`);
+    }
+};
+
+Coordinator.prototype._onVisibleAreaApproximateChange = function(canvas, isVisible) {
+    let uniqueId = canvas?.getUniqueId();
+    LogUtil.info(`${this._getLogTag()} canvas(${uniqueId}) visible area changed to ${isVisible}.`);
+    if (!canvas) {
+        return;
+    }
+    let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+    canvasShadow.status.hasArea = isVisible;
+
+    this._notifyAnimationCanvasHasArea(canvasShadow.context2dShadow?.animation, isVisible,
+        canvasShadow.context2dShadow);
+};
+
+Coordinator.prototype._onContext2dAttachedToCanvas = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    let { canvas } = context2d;
+    let canvasUniqueId = canvas?.getUniqueId();
+    let context2dShadow = this._context2dShadows.get(context2d);
+    LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow?._id}) attached to canvas(${canvasUniqueId})`);
+    if (!canvas) {
+        return;
+    }
+    let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+    canvasShadow.context2dShadow = context2dShadow;
+
+    if (context2dShadow?.canvasShadow !== canvasShadow) {
+        context2dShadow.canvasShadow = canvasShadow;
+    } else {
+        LogUtil.warn(`${this._getLogTag()} context2d(${context2dShadow?._id}) already attached to the same canvas(${canvasUniqueId}).`);
+    }
+
+    this._onVisibleAreaApproximateChange(canvasShadow.canvas, canvasShadow.status.hasArea);
+};
+
+Coordinator.prototype._onContext2dDetachedFromCanvas = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    let canvas = context2dShadow?.canvasShadow?.canvas;
+    let canvasUniqueId = canvas?.getUniqueId();
+    LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow?._id}) detached from canvas(${canvasUniqueId})`);
+
+    this._notifyAnimationCanvasHasArea(context2dShadow?.animation, false, context2dShadow);
+
+    if (canvas) {
+        let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+        if (canvasShadow) {
+            canvasShadow.context2dShadow = null;
+        }
+    }
+
+    if (context2dShadow) {
+        context2dShadow.canvasShadow = null; // null:ç¡®å®šè§£ç»‘, undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+    }
+};
+
+Coordinator.prototype._getOrCreateContext2dCallback = function (context2d) {
+    if (!context2d) {
+        return {};
+    }
+    let callbacks = this._context2dCallbacks.get(context2d);
+    if (!callbacks) {
+        // _onContext2dAttachedToCanvas éœ€è¦ä¸€ä¸ªé¢å¤–çš„context2dä½œä¸ºå‚æ•°, éœ€é€šè¿‡bindä¼ é€’è¿›å»
+        callbacks = {
+            onContext2dAttachedToCanvas: this._onContext2dAttachedToCanvas.bind(this, context2d),
+            onContext2dDetachedFromCanvas: this._onContext2dDetachedFromCanvas.bind(this, context2d),
+        };
+        this._context2dCallbacks.set(context2d, callbacks);
+    }
+    return callbacks;
+};
+
+Coordinator.prototype.setAttachedCanvasHasVisibleArea = function(context2d, hasArea) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        LogUtil.warn(`${this._getLogTag()} context2d has not yet bound to coordinator.`);
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    if (canvas) {
+        LogUtil.info(`${this._getLogTag()} fix visible area of canvas(${canvas.getUniqueId()})` +
+            ` attached to context2d(${context2dShadow._id}) to ${hasArea}`);
+        this._onVisibleAreaApproximateChange(canvas, hasArea);
+    } else {
+        LogUtil.warn(`${this._getLogTag()} context2d(${context2dShadow._id}) has no canvas attached.`);
+    }
+};
+
+Coordinator.prototype.isContext2dBoundToCoordinator = function (context2d) {
+    if (!context2d) {
+        return false;
+    }
+    return this._context2dShadows.has(context2d);
+};
+
+Coordinator.prototype.bindContext2dToCoordinator = function(context2d) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (context2dShadow) {
+        LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow._id}) already attached to coordinator.`);
+        context2dShadow.option.preferredNoArea = true;
+        return;
+    }
+    this.internalBindContext2dToCoordinator(context2d, true);
+};
+
+Coordinator.prototype.internalBindContext2dToCoordinator = function (context2d, preferredNoArea) {
+    if (deviceInfo.sdkApiVersion < 13 || !context2d?.on) {
+        // å½±å­æ•°æ®å¼ºä¾èµ–context2dçš„onæ¥å£, åªæœ‰API 13+æ‰å…·å¤‡.
+        LogUtil.error(`${this._getLogTag()} API level(${deviceInfo.sdkApiVersion}) is too low.`);
+        return;
+    }
+
+    let context2dShadow = {
+        _id: _nextIdInCoordinator++,
+        context2d,
+        option: {
+            preferredNoArea, // G.OBJ.03 æ¨èåœ¨å¯¹è±¡å­—é¢é‡ä¸­ä½¿ç”¨æ–¹æ³•ç®€å†™å’Œå±æ€§ç®€å†™
+        },
+        animation: undefined, // undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+        canvasShadow: undefined, // undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+    };
+    this._context2dShadows.set(context2d, context2dShadow);
+    LogUtil.info(`${this._getLogTag()} bind context2d(${context2dShadow._id}) to coordinator${preferredNoArea ?
+        ' with no area preferred' : ''}.`);
+
+    let callbacks = this._getOrCreateContext2dCallback(context2d);
+    context2d.on('onAttach', callbacks.onContext2dAttachedToCanvas);
+    context2d.on('onDetach', callbacks.onContext2dDetachedFromCanvas);
+
+    let { canvas } = context2d; // G.MET.11 å»ºè®®ä½¿ç”¨å‚æ•°çš„è§£æ„
+    if (canvas) {
+        /* æ­¤æ—¶context2dæœ‰ä¸€ä¸ªå…³è”åˆ°çš„canvas. å®ƒä¸context2dæœ‰å¯èƒ½æ˜¯attachedçš„, ä¹Ÿæœ‰å¯èƒ½æ˜¯æ›¾ç»attachedè¿‡ä½†åˆè¢«detachedäº†.
+         * ä¸ºé¿å…è¯¯åˆ¤é€ æˆæœ¬è¯¥æ´»åŠ¨è€Œæœªæ´»åŠ¨, æ­¤å¤„è§†å…¶ä¸ºattachedçš„canvasæ¥å¤„ç†, å¹¶åšä¸€æ¬¡å¿…è¦çš„"è¡¥è°ƒ"
+         */
+        LogUtil.warn(`${this._getLogTag()} canvas(${canvas.getUniqueId()}) indeterminate attached or not, treat it as attached.`);
+        callbacks.onContext2dAttachedToCanvas();
+    } else {
+        context2dShadow.canvasShadow = null;
+    }
+};
+
+Coordinator.prototype.unbindContext2dFromCoordinator = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    if (deviceInfo.sdkApiVersion < 13) {
+        // å½±å­æ•°æ®å¼ºä¾èµ–context2dçš„onæ¥å£, åªæœ‰API 13+æ‰å…·å¤‡.
+        LogUtil.error(`${this._getLogTag()} API level(${deviceInfo.sdkApiVersion}) is too low.`);
+        return;
+    }
+
+    let context2dShadow = this._context2dShadows.get(context2d);
+    LogUtil.info(`${this._getLogTag()} unbind context2d(${context2dShadow?._id}) from coordinator`);
+
+    if (!context2dShadow) {
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    if (canvas) {
+        // è¿™é‡Œåº”è¯¥å»è§£æ³¨å†Œcanvasä¸Šçš„å›è°ƒ, ä½†è§£æ³¨å†Œæ¥å£å­˜åœ¨bug, å†æ¬¡æ³¨å†Œæ—¶æ¥å£ä¼šå¤±æ•ˆ.
+        // è€ƒè™‘åˆ°canvasèŠ‚ç‚¹é”€æ¯æ—¶å›è°ƒè‡ªç„¶ä¼šè¢«è§£æ‰, æ•…è¿™é‡Œå¿½ç•¥ç›¸å…³çš„è§£æ³¨å†Œå¤„ç†, ç›´æ¥æ¸…ç†cache.
+        this._canvasShadows.delete(canvas);
+    }
+
+    let callbacks = this._context2dCallbacks.get(context2d);
+    if (callbacks && context2d?.off) {
+        context2d.off('onAttach', callbacks.onContext2dAttachedToCanvas);
+        context2d.off('onDetach', callbacks.onContext2dDetachedFromCanvas);
+    }
+
+    this._context2dShadows.delete(context2d);
+};
+
+Coordinator.prototype.attachAnimationToContext2d = function (context2d, animation) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        LogUtil.warn(`${this._getLogTag()} context2d must be bound to coordinator firstly. `);
+        return;
+    }
+
+    if (context2dShadow.animation === animation) {
+        LogUtil.warn(`${this._getLogTag()} animation(${animation?.animationID}) already attached to context2d(${context2dShadow._id}).`);
+        return;
+    }
+
+    context2dShadow.animation = animation;
+
+    let { canvasShadow } = context2dShadow;
+    if (canvasShadow) {
+        this._onVisibleAreaApproximateChange(canvasShadow.canvas, canvasShadow.status.hasArea);
+    }
+};
+
+Coordinator.prototype.detachAnimationFromContext2d = function (context2d) {
+    if (!context2d) {
+        return null;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        return null;
+    }
+
+    let { animation } = context2dShadow; // G.MET.11 å»ºè®®ä½¿ç”¨å‚æ•°çš„è§£æ„
+    context2dShadow.animation = null; // null:ç¡®å®šè§£ç»‘, undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+
+    return animation;
+};
+
+/**
+ * isSkipFrameByOwnéœ€è¦åœ¨åˆå§‹åŒ–æ—¶ç»™å‡º, ä¸èƒ½åœ¨è¿è¡Œæ—¶åŠ¨æ€æ”¹å˜.
+ * è‹¥è¦æ”¯æŒåŠ¨æ€æ”¹å˜, éœ€è¦åšåˆ°åŠ¨æ€å»é™¤displaysyncçš„æŠ•ç¥¨, æš‚æ— åˆé€‚æ¥å£.
+ * é”€æ¯åé‡å»ºdisplaysyncæ˜¯ä¸ªå¯é€‰é¡¹, ä½†æ¶‰åŠåˆ°å„ç§çŠ¶æ€ç®¡ç†è¿‡äºå¤æ‚.
+ * è¯¥åœºæ™¯å¹¶ä¸å¸¸è§, æ•…æš‚ä¸å®ç°.
+ **/
+const _DURATION_BY_MS_ = 20000;
+const _ALLOWABLE_ERROR_BY_MS_ = 1.5; // timestampçš„æ—¶é—´ç²¾åº¦ä¸º1ä¸ªms, æ•…è®©å®¹è®¸è¯¯å·®ç¨å¤§äºè¯¥å€¼
+const _LEAD_BY_MS_ = 5; // æå‰post frameCallback çš„æ—¶é—´, è¯¥å€¼ä¸èƒ½å¤ªå°ä»¥è‡³äºé”™è¿‡vsync, ä¹Ÿä¸å®œå¤ªå¤§å¯¼è‡´å¸§ç‡è¿‡é«˜.
+let _nextIdInLooper = 0;
+const Looper = function(uiContext, animations, playFrameCallback, isSkipFrameByOwn) {
+    this._id = _nextIdInLooper++;
+    this._uiContext = uiContext;
+    this._animations = animations;
+    this._playingAnimationsNum = 0;
+    this._looperStopped = true;
+    this._playingFrameRate = 0;
+    this._looperType = null;
+    this._displaySync = null;
+    this._frameCallback = undefined;
+    this._frameCallbackPosted = 0;
+    this._animator = null;
+    this._monotonicTimeStampInMs = 0;
+    this._lastAnimatorProgress = 0;
+    this._lastOnFrameTs = 0;
+    this._lastPlayedFrameTs = 0;
+    this._expectedFrameTs = 0;
+    this._periodByMs = 0;
+    this._playFrameCallback = playFrameCallback;
+    this._setExpectedFrameRateRangeWrapper = null;
+    this._isSkipFrameByOwn = isSkipFrameByOwn;
+    this.__performance = {
+        lastTimestamp: 0,
+        frames: 0,
+        janks: 0,
+        maxPeriod: 0,
+    };
+
+    if (isSkipFrameByOwn) {
+        if (this._initFrameCallbackLooper()) {
+            // ä¸»åŠ¨è·³å¸§æ—¶ä¼˜é€‰frameCallback
+            return;
+        }
+    }
+
+    if (this._initDisplaySyncLooper()) {
+        return;
+    }
+
+    // fallback to animator
+    this._initAnimatorLooper();
+};
+
+Looper.prototype._getLogTag = function() {
+    if (this._uiContext?.getHostContext()?.abilityInfo?.name) {
+        return `<Looper@${this._uiContext.getHostContext().abilityInfo.name}(${this._id})>`;
+    } else {
+        return `<Looper(${this._id})>`;
+    }
+};
+
+Looper.prototype._skippingFrame = function (timestamp) {
+    if (this._periodByMs === 0) {
+        return false;
+    }
+
+    let supplyingPeriod = 0;
+    if (this._lastOnFrameTs !== 0) {
+        supplyingPeriod = timestamp - this._lastOnFrameTs;
+    }
+
+    let phaseOffset = this._expectedFrameTs - timestamp;
+    if ((phaseOffset < 0 && phaseOffset > -_ALLOWABLE_ERROR_BY_MS_) ||
+        (phaseOffset > 0 && phaseOffset < _ALLOWABLE_ERROR_BY_MS_)) {
+        phaseOffset = 0; // åœ¨å®¹è®¸è¯¯å·®èŒƒå›´å†…åˆ™å¿½ç•¥åå·®
+    }
+
+    let halfPeriod = supplyingPeriod >> 1;
+    if (phaseOffset > (halfPeriod + _ALLOWABLE_ERROR_BY_MS_)) {
+        return true; // åå·®ç¦»å½“å‰vsyncè¿‡å¤§, ä¸»åŠ¨è·³è¿‡æœ¬å¸§
+    }
+
+    // è®¡ç®—ä¸‹ä¸€å¸§æ—¶é—´æˆ³. æ³¨æ„jsçš„å–æ¨¡è¿ç®—ä¸å…¶å®ƒè¯­è¨€ä¸åŒ, ä¼šå‡ºç°è´Ÿçš„ä½™æ•°
+    this._expectedFrameTs = timestamp + phaseOffset % this._periodByMs + this._periodByMs;
+
+    return false;
+};
+
+Looper.prototype._baseOnframe = function (timestamp, displaySynced) {
+    if (this._isSkipFrameByOwn && this._skippingFrame(timestamp)) {
+        return;
+    }
+
+    this._playFrameCallback(this._uiContext, timestamp, displaySynced);
+
+    this._performancePeriodically(timestamp);
+
+    this._lastPlayedFrameTs = timestamp;
+};
+
+Looper.prototype._performancePeriodically = function (timestamp) {
+    let _DURATION_ = 2_000; // heartbeat every <_DURATION_>ms elapsed
+
+    try {
+        this.__performance.frames++;
+
+        let supplyingPeriod = timestamp - this._lastPlayedFrameTs;
+        if (supplyingPeriod > this._periodByMs + _ALLOWABLE_ERROR_BY_MS_ + _ALLOWABLE_ERROR_BY_MS_) {
+            this.__performance.janks++;
+        }
+
+        if (supplyingPeriod > this.__performance.maxPeriod) {
+            this.__performance.maxPeriod = supplyingPeriod;
+        }
+
+        let elapsedMs = timestamp - this.__performance.lastTimestamp;
+        if (elapsedMs > _DURATION_) {
+            this.__performance.frames = 0;
+            this.__performance.janks = 0;
+            this.__performance.maxPeriod = 0;
+            this.__performance.lastTimestamp = timestamp;
+        }
+    } catch (e) {
+        // do nothing. performing does NOT matter
+    }
+};
+
+Looper.prototype._baseFirst = function () {
+    this._monotonicTimeStampInMs = 0;
+    this._lastPlayedFrameTs = 0;
+    this._expectedFrameTs = 0;
+};
+
+Looper.prototype._baseSetExpectedFrameRateRange = function (playingFrameRate) {
+    LogUtil.info(`${this._getLogTag()} ${this._looperType} running at ${playingFrameRate} HZ`);
+    this._periodByMs = 1000 / playingFrameRate;
+
+    if (!this._isSkipFrameByOwn) {
+        if (this._setExpectedFrameRateRangeWrapper) {
+            this._setExpectedFrameRateRangeWrapper({ min: 0, max: 120, expected: playingFrameRate });
+        } else {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} has no displaySync. no frame rate set.`);
+        }
+    } else {
+        // ä¸åšæŠ•ç¥¨, é¿å…æ‹‰ä½uiå¸§ç‡
+    }
+};
+
+Looper.prototype._initFrameCallbackLooper = function () {
+    let apiVersion = deviceInfo?.sdkApiVersion;
+    if (apiVersion >= 13 && this._uiContext) {
+        /* å°½ç®¡FrameCallbackæœºåˆ¶åœ¨API 12å·²æ”¯æŒ, ä½†ç”±äºå®ƒæ‰€ä¾èµ–çš„uiContextéœ€è¦ä»context2dæ‰€å…³è”çš„canvasèŠ‚ç‚¹ä¸­è·å–,
+         * è€ŒAPI 13åŠä»¥ä¸Šæ‰æ”¯æŒä»context2dä¸­è·å–canvasèŠ‚ç‚¹, æ•…åªèƒ½åœ¨API 13åŠä»¥ä¸Šæ‰å¯ä»¥ä½¿èƒ½frameCallback
+         */
+        this._frameCallback = {
+            onFrame: (timestamp) => {
+                this._frameCallbackPosted--; // æ¯æ¬¡è¿›å…¥å›è°ƒå‡æ„å‘³ç€æ¶ˆè´¹æ‰1æ¬¡frameCallback
+
+                if (this._looperStopped) {
+                    return;
+                }
+
+                // ç¡®ä¿æœ‰ä¸”ä»…æœ‰1ä¸ªframeCallbackè¢«poståˆ°ç®¡çº¿ä¸Š, é¿å…frameCallbackå †ç§¯
+                if (this._uiContext && this._frameCallbackPosted <= 0) {
+                    this._uiContext.postDelayedFrameCallback(this._frameCallback, this._periodByMs - _LEAD_BY_MS_);
+                    this._frameCallbackPosted++;
+                }
+
+                this._lastOnFrameTs = this._monotonicTimeStampInMs;
+                this._monotonicTimeStampInMs = Math.floor(timestamp / 1000_000);
+
+                this._baseOnframe(this._monotonicTimeStampInMs, true);
+            },
+        };
+        LogUtil.info(`${this._getLogTag()} frameCallback created.`);
+
+        this._exportApiByFrameCallback();
+
+        return true;
+    } else {
+        LogUtil.warn(`${this._getLogTag()} api version(${apiVersion}) is too low. frameCallback is disabled.`);
+    }
+
+    return false;
+};
+
+Looper.prototype._exportApiByFrameCallback = function() {
+    // å¯¼å‡ºå¤–éƒ¨å¯è°ƒç”¨æ–¹æ³•(å†…éƒ¨æ–¹æ³•ä»¥"_"å¼€å¤´)
+    this._looperType = 'frameCallback';
+
+    this.first = function () {
+        this._baseFirst();
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first`);
+    };
+
+    this.start = function () {
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} start`);
+        if (this._uiContext) {
+            if (this._frameCallbackPosted <= 0) {
+                // ä¸èƒ½æ— æ¡ä»¶post. å¦‚æœå·²æœ‰callbackè¢«posted, å†æ¬¡postä¼šé€ æˆframeCallbackå †ç§¯å¯¼è‡´é«˜å¸§ç‡
+                this._uiContext.postFrameCallback(this._frameCallback);
+                this._frameCallbackPosted++;
+            }
+            this._looperStopped = false;
+        } else {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} no uicontext, frameCallback could not work.`);
+        }
+    };
+
+    this.stop = function () {
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} stop`);
+        this._looperStopped = true;
+    };
+
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype._initDisplaySyncLooper = function () {
+    try {
+        this._displaySync = displaySync.create();
+        this._displaySync.on('frame', (frameInfo) => {
+            if (this._looperStopped) {
+                return;
+            }
+
+            this._lastOnFrameTs = this._monotonicTimeStampInMs;
+            this._monotonicTimeStampInMs = Math.floor(frameInfo.timestamp / 1000_000);
+
+            this._baseOnframe(this._monotonicTimeStampInMs, true);
+        });
+        LogUtil.info(`${this._getLogTag()} displaySync created.`);
+
+        this._exportApiByDisplaySync();
+
+        return true;
+    } catch (e) {
+        LogUtil.info(`${this._getLogTag()} no displaySync. API version(${deviceInfo?.sdkApiVersion}) may be too low: ${e.message}`);
+    }
+
+    return false;
+};
+
+Looper.prototype._exportApiByDisplaySync = function() {
+    // å¯¼å‡ºå¤–éƒ¨å¯è°ƒç”¨æ–¹æ³•(å†…éƒ¨æ–¹æ³•ä»¥"_"å¼€å¤´)
+    this._looperType = 'displaySync';
+
+    this.first = function () {
+        this._baseFirst();
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first`);
+    };
+
+    this.start = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT start cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} start`);
+        this._displaySync.start();
+        this._looperStopped = false;
+    };
+
+    this.stop = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT stop cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} stop`);
+        this._looperStopped = true;
+        this._displaySync.stop();
+    };
+
+    this._setExpectedFrameRateRangeWrapper = this._displaySync.setExpectedFrameRateRange.bind(this._displaySync);
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype._initAnimatorLooper = function () {
+    let options = {
+        duration: _DURATION_BY_MS_,
+        easing: 'linear',
+        delay: 0,
+        fill: 'forwards',
+        direction: 'normal',
+        iterations: -1,
+        begin: 0,
+        end: 1
+    };
+    this._animator = animator.create(options);
+    this._registerCallbackForAnimator();
+    LogUtil.info(`${this._getLogTag()} animator created.`);
+
+    this._exportApiByAnimator();
+
+    return true;
+};
+
+Looper.prototype._registerCallbackForAnimator = function() {
+    let sdkApiVersion = deviceInfo?.sdkApiVersion;
+
+    let oncancel = () => {
+        this._lastAnimatorProgress = 0;
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} oncancel.`);
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onCancel = oncancel;
+    } else {
+        this._animator.oncancel = oncancel;
+    }
+
+    let onfinish = () => {
+        this._lastAnimatorProgress = 0;
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} onfinish.`);
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onFinish = onfinish;
+    } else {
+        this._animator.onfinish = onfinish;
+    }
+
+    let onframe = (progress) => {
+        if (this._looperStopped) {
+            // animator.cancel -> onframe -> animator.oncancel
+            return;
+        }
+        // åœ¨æ¯ä¸€æ¬¡å¸§åŠ¨ç”»å›è°ƒæ—¶ï¼Œå¿½ç•¥ç³»ç»Ÿæ—¶é—´ï¼Œä»…ä»¥åŠ¨ç”»æ­¥è¿›æ¥è®¡ç®—ä¸‹ä¸€æ¬¡æ—¶é—´æˆ³ï¼Œé¿å…æ—¶é—´è°ƒæ•´å¼•èµ·çš„è·³å˜
+        let positiveProgress = progress - this._lastAnimatorProgress + 1;
+        let modularProgress = positiveProgress - (positiveProgress >>> 0); // é«˜æ•ˆåœ°å–å‡ºå°æ•°éƒ¨åˆ†, ç›¸å½“äºå¯¹1å–æ¨¡
+        let step = (_DURATION_BY_MS_ * modularProgress) >>> 0; // Zero-fill right shift for truncation to integer
+        if (step > 0) {
+            if (step > this._periodByMs + _ALLOWABLE_ERROR_BY_MS_ + _ALLOWABLE_ERROR_BY_MS_) {
+                let logInfo =
+                    `step(${step}) is too significant. progress(${progress
+                    }), last progress(${this._lastAnimatorProgress
+                    }), modular progress(${modularProgress
+                    })`;
+                LogUtil.warn(`${this._getLogTag()} ${this._looperType} ${logInfo}`);
+            }
+
+            this._lastOnFrameTs = this._monotonicTimeStampInMs;
+            this._monotonicTimeStampInMs += step;
+            this._lastAnimatorProgress = progress;
+
+            this._baseOnframe(this._monotonicTimeStampInMs, false);
+        }
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onFrame = onframe;
+    } else {
+        this._animator.onframe = onframe;
+    }
+};
+
+Looper.prototype._exportApiByAnimator = function() {
+    this._looperType = 'animator';
+
+    this.first = function () {
+        this._baseFirst();
+        this._lastAnimatorProgress = 0;
+        this._monotonicTimeStampInMs = Math.floor(Date.now());
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first: ${this._monotonicTimeStampInMs}`);
+    };
+
+    this.start = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT start cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} play`);
+        this._animator.play();
+        this._looperStopped = false;
+    };
+
+    this.stop = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT stop cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} cancel`);
+        this._looperStopped = true;
+        // do not call '_animator.finish' function which will further call animator.onframe causing stack overflow.
+        this._animator.cancel();
+    };
+
+    this._setExpectedFrameRateRangeWrapper = this._animator.setExpectedFrameRateRange?.bind(this._animator);
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype.onAnimationActive = function(animItem) {
+    if (animItem?.getFrameRate() > this._playingFrameRate) {
+        // æœ‰æ›´é«˜å¸§ç‡çš„åŠ¨ç”»æ´»åŠ¨ï¼Œéœ€è¦åˆ·æ–°å¸§ç‡
+        this.changeFrameRateIfNeeded();
+    }
+
+    this.addPlayingCount();
+};
+
+Looper.prototype.onAnimationIdle = function(animItem) {
+    this.subtractPlayingCount();
+
+    if (animItem?.getFrameRate() >= this._playingFrameRate) {
+        // æœ€é«˜å¸§ç‡çš„åŠ¨ç”»æš‚åœï¼Œéœ€è¦åˆ·æ–°ä¸ºç¬¬äºŒé«˜çš„å¸§ç‡å€¼
+        this.changeFrameRateIfNeeded();
+    }
+};
+
+Looper.prototype.pickMaxFrameRate = function() {
+    let maxUserFr = animationManager?.getFrameRate();
+    if (maxUserFr > 0 && maxUserFr <= 120) {
+        return maxUserFr; // user already set frame rate. so ignore content fr for better performance
+    }
+
+    let maxFrameRate = 0;
+    let len = this._animations?.length;
+    for (let i = 0; i < len; i++) {
+        let animItem = this._animations[i]?.animation;
+        let uiContext = animItem?.getUiContext();
+        if ((!uiContext || (uiContext === this._uiContext)) && !animItem?._idle) {
+            let fr = animItem?.getFrameRate();
+            LogUtil.info(`${this._getLogTag()} check fr from '${animItem?.name}(${animItem?.animationID})' with ${fr} fps.`);
+            if (fr > maxFrameRate) {
+                maxFrameRate = fr;
+            }
+        }
+    }
+    return maxFrameRate;
+};
+
+Looper.prototype.addPlayingCount = function() {
+    this._playingAnimationsNum += 1;
+    if (this._playingAnimationsNum > 0) {
+        this.activate();
+    }
+};
+
+Looper.prototype.subtractPlayingCount = function() {
+    this._playingAnimationsNum -= 1;
+    if (this._playingAnimationsNum <= 0) {
+        this._playingAnimationsNum = 0;
+        this.deactivate();
+    }
+};
+
+Looper.prototype.activate = function() {
+    if (this._playingAnimationsNum > 0 && this._looperStopped) {
+        LogUtil.info(`${this._getLogTag()} activate.`);
+        this.first();
+        this.start();
+    }
+};
+
+Looper.prototype.deactivate = function() {
+    if (!this._looperStopped) {
+        LogUtil.info(`${this._getLogTag()} deactivate`);
+        this._playingFrameRate = 0;
+        this.stop();
+    }
+};
+
+Looper.prototype.changeFrameRateIfNeeded = function() {
+    let maxFr = this.pickMaxFrameRate();
+    if (maxFr === 0) {
+        this.deactivate();
+        return;
+    }
+
+    if (maxFr !== this._playingFrameRate) {
+        if (maxFr > 0 && maxFr <= 120) {
+            this._playingFrameRate = maxFr;
+            this.setExpectedFrameRateRange(this._playingFrameRate);
+        }
+    }
+};
+
+const animationManager = (function(){
+    let moduleOb = {};
+    let registeredAnimations = [];
+    let _packageName = '';
+    let _userPlayingFrameRate = 0;
+    let _contextLoopers = new WeakMap();
+    let _coordinator = new Coordinator();
+
+    function _getLogTag() {
+        let abilityName = getContext()?.abilityInfo?.name;
+        if (abilityName && _packageName !== '') {
+            return `<Manager(${abilityName})@${_packageName}>`;
+        } else if (abilityName) {
+            return `<Manager(${abilityName})>`;
+        } else if (_packageName !== '') {
+            return `<Manager@${_packageName}>`;
+        } else {
+            return '<Manager>';
+        }
+    }
+
+    function _logFunc(funcName, name, onlyCurrentAbility, value) {
+        let valueDesc = '';
+        if (value) {
+            valueDesc = ` with (${value})`;
+        }
+        let nameDesc = 'all animations';
+        if (name) {
+            nameDesc = `animation named by '${name}'`;
+        }
+
+        let abilityDesc = 'in all abilities';
+        if (onlyCurrentAbility) {
+            abilityDesc = 'in current ability';
+        }
+
+        LogUtil.info(`${_getLogTag()} ${funcName}${valueDesc} for ${nameDesc} ${abilityDesc}`);
+    }
+
+    function _isNameMatched(animation, nameTarget) {
+        if (!nameTarget || animation?.name === nameTarget) {
+            return true;
+        }
+        return false;
+    }
+
+    function _isAbilityMatched(animation, onlyCurrentAbility) {
+        let context = getContext();
+        if (!onlyCurrentAbility || animation?.getUiContext()?.getHostContext() === context) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function _getAnimationUiContext(animation) {
+        /* å¤šabilitiesçš„æ”¯æŒéœ€è¦ä¾èµ–äºåœ¨å‡†ç¡®çš„contextä¸Šå¯åœLooper, ä½†displaysyncæ— æ³•å®Œæˆè¿™ä¸ªä½¿å‘½.
+         * æ¯æ¬¡å¯åŠ¨displaysyncæ—¶, startå‡ä¼šå°†displaysyncæŒ‚è½½åˆ°å½“å‰æ‰§è¡Œä¸Šä¸‹æ–‡çš„ç®¡çº¿ä¸­, è¿™ä¼šå¯¼è‡´å¯èƒ½æŒ‚é”™.
+         * ä¸ºæ­¤å¼•å…¥frameCallback, å®ƒèƒ½å¤Ÿæ”¯æŒå‘ç‰¹å®šçš„ç®¡çº¿ä¸Špostå›è°ƒ, ä»è€Œç¡®ä¿ä¸Šä¸‹æ–‡æ­£ç¡®.
+         * ä½†frameCallbackéœ€è¦ä¸€ä¸ªå‡†ç¡®çš„uicontext, å½“å‰å¹¶æ— æ¥å£æ”¯æŒ.
+         * æ­¤å¤„ç›´æ¥å€ŸåŠ©äº†animationæ‰€å…³è”canvasèŠ‚ç‚¹çš„uiContext_, è¿™æœ‰ç‚¹ç±»ä¼¼javaä¸­çš„åå°„, å±äºä¸è§„èŒƒçš„åšæ³•.
+         * FIXME:å¾…åç»­æœ‰æ­£å¼æ¥å£æ—¶éœ€åšä¸‹è°ƒæ•´.
+         * (å¼•å…¥frameCallbackçš„å¦ä¸€ä¸ªå¥½å¤„æ˜¯å¯ä»¥é™ä½è´Ÿè½½, uiçº¿ç¨‹åªåœ¨å¿…è¦æ—¶æ‰è¢«å”¤é†’)
+         */
+        return animation?.wrapper?.canvas?.uiContext_;
+    }
+
+    function _getAllLooperFromAnimations() {
+        let allLooper = new Map();
+        let len = registeredAnimations?.length;
+        for (let i = len - 1; i >= 0; i--) {
+            let context = _getAnimationUiContext(registeredAnimations[i]?.animation)?.getHostContext();
+            if (context) {
+                let looper = _contextLoopers.get(context);
+                if (looper) {
+                    allLooper.set(looper, looper);
+                }
+            }
+        }
+
+        return allLooper;
+    }
+
+    function _getLooperFromAnimation(animation) {
+        let uiContext = _getAnimationUiContext(animation);
+        if (!uiContext) {
+            LogUtil.warn(`${_getLogTag()} could NOT get current uiContext. no looper created.`);
+            return null;
+        }
+
+        return _getOrCreateLooper(uiContext);
+    }
+
+    function _getOrCreateLooper(uiContext) {
+        let looper = _contextLoopers.get(uiContext);
+        if (!!looper) {
+            return looper;
+        }
+
+        looper = new Looper(uiContext, registeredAnimations, resume, true);
+        _contextLoopers.set(uiContext, looper);
+        return looper;
+    }
+
+    // web only
+    function registerAnimation(element, animationData) {
+        if (!element) {
+            return null;
+        }
+
+        let len = registeredAnimations?.length
+        for (let i = 0; i < len; i++) {
+            if (registeredAnimations[i]?.elem !== null && registeredAnimations[i]?.elem === element) {
+                return registeredAnimations[i]?.animation;
+            }
+        }
+
+        var animItem = new AnimationItem();
+        setupAnimation(animItem, element);
+        animItem.setData(element, animationData);
+        return animItem;
+    }
+
+    // web only
+    function getRegisteredAnimations() {
+        var animations = [];
+        let len = registeredAnimations?.length;
+        for (let i = 0; i < len; i += 1) {
+            animations.push(registeredAnimations[i]?.animation);
+        }
+        return animations;
+    }
+
+    function onAnimationItemLoaded(animItem) {
+        if (!!animItem.getUiContext()) {
+            LogUtil.info(`${animItem._getLogTag()} created with ${animItem.frameRate} fps.`);
+        } else {
+            LogUtil.warn(`${animItem._getLogTag()} created with ${animItem.frameRate} fps. no UIContext.`);
+        }
+    }
+
+    function onAnimationItemDestroy(ev) {
+        let animItem = ev.target;
+        let len = registeredAnimations?.length
+        for (let i = len - 1; i >= 0; i--) {
+            if (registeredAnimations[i]?.animation === animItem) {
+                registeredAnimations[i].animation = null;
+                registeredAnimations.splice(i, 1);
+                _coordinator.detachAnimationFromContext2d(animItem?.wrapper);
+                LogUtil.info(`${animItem._getLogTag()} destroyed with ${animItem.frameRate} fps`);
+            }
+        }
+    }
+
+    function onAnimationItemActive(animItem) {
+        if (!!animItem?.getUiContext()) {
+            LogUtil.info(`${animItem?._getLogTag()} activated with ${animItem?.getFrameRate()} fps.`);
+        } else {
+            LogUtil.warn(`${animItem?._getLogTag()} activated with ${animItem?.getFrameRate()} fps. no UiContext.`);
+        }
+
+        _getLooperFromAnimation(animItem)?.onAnimationActive(animItem);
+    }
+
+    function onAnimationItemIdle(animItem) {
+        if (!!animItem?.getUiContext()) {
+            LogUtil.info(`${animItem?._getLogTag()} deactivated with ${animItem?.getFrameRate()} fps`);
+        } else {
+            LogUtil.warn(`${animItem?._getLogTag()} deactivated with ${animItem?.getFrameRate()} fps. no UiContext.`);
+        }
+
+        _getLooperFromAnimation(animItem)?.onAnimationIdle(animItem);
+    }
+
+    function _destroyAnimationWithSameContext2d(context2d) {
+        let len = registeredAnimations?.length;
+        for (let i = len - 1; i >= 0; i--) {
+            let animation = registeredAnimations[i]?.animation;
+            if (animation?.wrapper === context2d) {
+                LogUtil.warn(`${_getLogTag()} destroy animation '${animation.name}(${animation?.animationID})' from ${animation?.source},
+          because animation using the same context2D. `);
+                registeredAnimations.splice(i, 1);
+                animation?.destroy();
+            }
+        }
+    }
+
+    function setupAnimation(animItem, element) {
+        animItem.addEventListener('destroy', onAnimationItemDestroy);
+        animItem.addEventListener('_active', onAnimationItemActive);
+        animItem.addEventListener('_idle', onAnimationItemIdle);
+        animItem.addEventListener('DOMLoaded', onAnimationItemLoaded);
+        registeredAnimations.push({ elem: element, animation: animItem });
+    }
+
+    function loadAnimation(params) {
+        LogUtil.info(`${_getLogTag()} load animation named '${params.name ? params.name : ''}'` +
+            `${params.uri ? ' from ' + params.uri : (params.path ? ' from ' + params.path : '')}` +
+            `, canvas uniqueId is: ${params.container?.canvas?.getUniqueId()}`);
+        LogUtil.version();
+        let context2d = params.wrapper || params.container;
+        if (!context2d) {
+            LogUtil.warn(`${_getLogTag()} loadAnimation failed because no container`);
+            return null;
+        }
+
+        let animItem = _coordinator.detachAnimationFromContext2d(context2d);
+        if (animItem) {
+            LogUtil.warn(`${_getLogTag()} destroy animation '${animItem.name}(${animItem.animationID})' in the context2d. from ${animItem.source}`);
+            animItem.destroy();
+        } else {
+            _destroyAnimationWithSameContext2d(context2d);
+        }
+
+        animItem = new AnimationItem();
+        if (!_coordinator.isContext2dBoundToCoordinator(context2d)) {
+            /* æ‰§è¡Œ loadAnimation æ—¶è¿˜æœªå°† context2d ç»‘å®šåˆ° coordinator ä¸Š, å³ç”¨æˆ·å°šæœªæ˜¾å¼è°ƒç”¨bindContext2dToCoordinator
+             * è¯´æ˜ç”¨æˆ·è¿˜å¤„åœ¨æ—§çš„å¤„ç†é€»è¾‘ä¸­, éœ€è¦å¸®ç”¨æˆ·åšä¸€æ¬¡è°ƒç”¨
+             * å‡ºäºå…¼å®¹æ€§è€ƒè™‘, æ­¤æ—¶éœ€ä¿æŒ preferredNoArea ä¸º false, å³é»˜è®¤ canvas æœ‰å¯è§é¢ç§¯
+             */
+            _coordinator.internalBindContext2dToCoordinator(context2d, false);
+        }
+        _coordinator.attachAnimationToContext2d(context2d, animItem);
+
+        setupAnimation(animItem, null);
+        animItem.setParams(params);
+        return animItem;
+    }
+
+    function setSpeed(val, animationName, onlyCurrentAbility) {
+        _logFunc('setSpeed', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setSpeed(val);
+            }
+        }
+    }
+
+    function setDirection(val, animationName, onlyCurrentAbility) {
+        _logFunc('setDirection', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setDirection(val);
+            }
+        }
+    }
+
+    function play(animationName, onlyCurrentAbility) {
+        _logFunc('play', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.play();
+            }
+        }
+    }
+
+    function resume(uiContext, timestamp, displaySynced) {
+        let len = registeredAnimations.length;
+
+        for (let i = 0; i < len; i += 1) {
+            if (!uiContext || registeredAnimations[i]?.animation.getUiContext() === uiContext) {
+                registeredAnimations[i]?.animation.resume(timestamp, displaySynced);
+            }
+        }
+    }
+
+    function pause(animationName, onlyCurrentAbility) {
+        _logFunc('pause', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.pause();
+            }
+        }
+    }
+
+    function goToAndStop(value, isFrame, animationName, onlyCurrentAbility) {
+        _logFunc('goToAndStop', animationName, onlyCurrentAbility, `${value},${isFrame}`);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.goToAndStop(value, isFrame);
+            }
+        }
+    }
+
+    function goToAndPlay(value, isFrame, animationName, onlyCurrentAbility) {
+        _logFunc('goToAndPlay', animationName, onlyCurrentAbility, `${value},${isFrame}`);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.goToAndPlay(value, isFrame);
+            }
+        }
+    }
+
+    function stop(animationName, onlyCurrentAbility) {
+        _logFunc('stop', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.stop();
+            }
+        }
+    }
+
+    function togglePause(animationName, onlyCurrentAbility) {
+        _logFunc('togglePause', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.togglePause();
+            }
+        }
+    }
+
+    /**
+     * è®¾ç½®packageName
+     * @param name åº”ç”¨çš„åŒ…å
+     */
+    function setPackageName(name) {
+        LogUtil.info(`${_getLogTag()} setPackageName: ${name}`);
+        _packageName = name;
+    }
+
+    /**
+     * è®¾ç½®æ‰€æœ‰åŠ¨ç”»çš„æ’­æ”¾å¸§ç‡
+     * @param frameRate å¸§ç‡
+     */
+    function setFrameRate(frameRate) {
+        LogUtil.info(`${_getLogTag()} setFrameRate: ${frameRate}`);
+        _userPlayingFrameRate = frameRate;
+
+        _getAllLooperFromAnimations()?.forEach((looper) => {
+            looper.changeFrameRateIfNeeded();
+        });
+    }
+
+    /**
+     * è·å–å½“å‰æ‰€æœ‰åŠ¨ç”»çš„æ’­æ”¾å¸§ç‡
+     * @returns å¸§ç‡
+     */
+    function getFrameRate() {
+        return _userPlayingFrameRate;
+    }
+
+    function destroy(animationName, onlyCurrentAbility) {
+        _logFunc('destroy', animationName, onlyCurrentAbility);
+        LogUtil.version();
+
+        let len = registeredAnimations.length;
+        for (let i = (len - 1); i >= 0; i -= 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                // æ‰¾åˆ°å³å°†è¦è¢«destroyçš„åŠ¨ç”»ï¼Œé”€æ¯ä¹‹ã€‚ä¼šè§¦å‘å›è°ƒï¼Œåœ¨å›è°ƒä¸­è¿›è¡ŒçŠ¶æ€æ¸…ç†
+                registeredAnimations[i]?.animation.destroy();
+            }
+        }
+        if (registeredAnimations.length === 0) {
+            bez.storedData = {};
+        }
+    }
+
+    // html only
+    function searchAnimations(animationData, standalone, renderer) {
+        if (!document) {
+            return;
+        }
+        let animElements = [].concat([].slice.call(document.getElementsByClassName('lottie')),
+            [].slice.call(document.getElementsByClassName('bodymovin')));
+        let lenAnims = animElements.length;
+        for (let i = 0; i < lenAnims; i += 1) {
+            if (renderer && !!animElements[i]) {
+                animElements[i].setAttribute('data-bm-type', renderer);
+            }
+            registerAnimation(animElements[i], animationData);
+        }
+        if (standalone && lenAnims === 0) {
+            if (!renderer) {
+                renderer = 'svg';
+            }
+            var body = document.getElementsByTagName('body')[0];
+            body.innerText = '';
+            var div = createTag('div');
+            div.style.width = '100%';
+            div.style.height = '100%';
+            div.setAttribute('data-bm-type', renderer);
+            body.appendChild(div);
+            registerAnimation(div, animationData);
+        }
+    }
+
+    function setContentMode(contentMode, animationName, onlyCurrentAbility) {
+        _logFunc('setContentMode', animationName, onlyCurrentAbility, contentMode);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setContentMode(contentMode);
+            }
+        }
+    }
+
+    function resize(width, height, animationName, onlyCurrentAbility) {
+        _logFunc('resize', animationName, onlyCurrentAbility, `${width} x ${height}`);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.resize(width, height);
+            }
+        }
+    }
+
+    function freeze(animationName, onlyCurrentAbility) {
+        _logFunc('freeze', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i].animation.pause();
+            }
+        }
+    }
+
+    function unfreeze(animationName, onlyCurrentAbility) {
+        _logFunc('unfreeze', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i].animation.play();
+            }
+        }
+    }
+
+    function setVolume(val, animationName, onlyCurrentAbility) {
+        _logFunc('setVolume', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setVolume(val);
+            }
+        }
+    }
+
+    function mute(animationName, onlyCurrentAbility) {
+        _logFunc('mute', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.mute();
+            }
+        }
+    }
+
+    function unmute(animationName, onlyCurrentAbility) {
+        _logFunc('unmute', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.unmute();
+            }
+        }
+    }
+
+    /**
+     * æ¸…é™¤å•ä¸ªæ–‡ä»¶ç¼“å­˜ï¼ˆæ”¯æŒåŒæ­¥/å¼‚æ­¥æ¨¡å¼ï¼‰
+     * @param {string} path - æ–‡ä»¶è·¯å¾„ï¼ˆæ”¯æŒHTTP URLæ ¼å¼ï¼‰
+     * @param {Object} container - åŒ…å«JSONæ•°æ®çš„å®¹å™¨å¯¹è±¡
+     * @param {boolean} isSync - æ˜¯å¦ä½¿ç”¨åŒæ­¥æ¨¡å¼æ“ä½œ
+     */
+    function clearSingleFileCache(path, container, isSync) {
+        // å®‰å…¨æ ¡éªŒï¼šç¡®ä¿ä¸Šä¸‹æ–‡å­˜åœ¨
+        let context = getContext();
+        if (!context) {
+            return;
+        }
+
+        // å¤„ç†HTTPèµ„æºè·¯å¾„
+        if (path.startsWith('http')) {
+            let pathSegments = path.split('/');
+            let parentDirName = pathSegments[pathSegments.length - 2]; // çˆ¶çº§ç›®å½•å
+            let originalFileName = pathSegments[pathSegments.length - 1]; // åŸå§‹æ–‡ä»¶åï¼ˆå«æ‰©å±•åï¼‰
+            let cleanFileName = originalFileName.replace(/\.(?:zip|json)$/i, ''); // æ¸…ç†åæ–‡ä»¶åï¼ˆå»é™¤æ‰©å±•åï¼‰
+
+            let lottieBaseDir = `${context.filesDir}/lottie/${parentDirName}`; // åŸºç¡€å­˜å‚¨ç›®å½•
+            let targetDirectory = `${lottieBaseDir}/${cleanFileName}`; // ç›®æ ‡ç›®å½•
+
+            // æ‰§è¡Œç›®å½•æ¸…ç†
+            rmdir(targetDirectory, isSync);
+        }
+
+        // å¤„ç†å›¾ç‰‡èµ„æº
+        if (container) {
+            try {
+                // è§£æèµ„æºä¸­çš„JSONæ•°æ®
+                let jsonString = container.getJsonData(path);
+                let jsonObj = JSON.parse(jsonString);
+
+                // æ„å»ºå›¾ç‰‡åŠ è½½ç›®å½•è·¯å¾„
+                let loadPath = `${context.filesDir}/lottie/loadImages/`;
+
+                // æ£€æŸ¥æ˜¯å¦å­˜åœ¨ç½‘ç»œèµ„æº
+                if (isExistNetworkAssets(jsonObj?.assets)) {
+                    rmdir(loadPath, isSync, jsonObj);
+                }
+            } catch (error) {
+                LogUtil.error(`JSONè§£æå¤±è´¥: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * å¼‚æ­¥æ¸…é™¤æ–‡ä»¶ç¼“å­˜
+     * @param {string} url - è¦æ¸…é™¤ç¼“å­˜çš„æ–‡ä»¶URLæˆ–æœ¬åœ°è·¯å¾„
+     * @param {Object|string} container - ç¼“å­˜å®¹å™¨å¯¹è±¡æˆ–ç›®å½•è·¯å¾„
+     */
+    function clearFileCache(url, container) {
+        clearFile(url, container, false);
+    }
+
+    /**
+     * åŒæ­¥æ¸…é™¤æ–‡ä»¶ç¼“å­˜
+     * @param {string} url - è¦æ¸…é™¤ç¼“å­˜çš„æ–‡ä»¶URLæˆ–æœ¬åœ°è·¯å¾„
+     * @param {Object|string} container - ç¼“å­˜å®¹å™¨å¯¹è±¡æˆ–ç›®å½•è·¯å¾„
+     */
+    function clearFileCacheSync(url, container) {
+        clearFile(url, container, true);
+    }
+
+    /**
+     * æ¸…ç†æ–‡ä»¶ç¼“å­˜ï¼ˆæ”¯æŒå•æ–‡ä»¶æˆ–å…¨å±€æ¸…ç†ï¼‰
+     * @param {string} [url] - å¯é€‰çš„æ–‡ä»¶URLè·¯å¾„ï¼Œå­˜åœ¨æ—¶æ¸…ç†æŒ‡å®šæ–‡ä»¶ç¼“å­˜
+     * @param {Object} container - åŒ…å«JSONæ•°æ®çš„å®¹å™¨å¯¹è±¡ï¼Œç”¨äºè§£æå…³è”èµ„æº
+     * @param {boolean} isSync - æ˜¯å¦ä½¿ç”¨åŒæ­¥æ¨¡å¼æ‰§è¡Œæ¸…ç†æ“ä½œ
+     */
+    function clearFile(url, container, isSync) {
+        // å®‰å…¨æ ¡éªŒï¼šç¡®ä¿ä¸Šä¸‹æ–‡å­˜åœ¨
+        let context = getContext();
+        if (!context) {
+            return;
+        }
+
+        if (url) {
+            // å•æ–‡ä»¶æ¸…ç†æ¨¡å¼ï¼šç²¾ç¡®æ¸…ç†æŒ‡å®šURLå¯¹åº”çš„ç¼“å­˜
+            clearSingleFileCache(url, container, isSync);
+            return;
+        }
+        let fileDir = `${context.filesDir}/lottie`; // åº”ç”¨ç§æœ‰æ–‡ä»¶ç›®å½•
+        let cacheDir = `${context.cacheDir}/lottie`; // ç³»ç»Ÿç¼“å­˜ç›®å½•
+
+        // æ‰§è¡Œæ¸…ç†æ“ä½œï¼ˆåŒæ­¥/å¼‚æ­¥æ¨¡å¼ï¼‰
+        rmdir(fileDir, isSync);
+        rmdir(cacheDir, isSync);
+    }
+
+    /**
+     * åˆ é™¤æŒ‡å®šèµ„æºæ–‡ä»¶
+     * @param {string} path - åŸºç¡€ç›®å½•è·¯å¾„
+     * @param {Object} assets - èµ„æºå¯¹è±¡ï¼ŒåŒ…å«idå’Œp(è·¯å¾„)å±æ€§
+     * @param {Array} filenames - æ–‡ä»¶åæ•°ç»„
+     * @param {boolean} isSync - æ˜¯å¦åŒæ­¥åˆ é™¤æ ‡å¿—
+     */
+    function rmAssetsDir(path, assets, filenames, isSync) {
+        // åˆ¤æ–­æ˜¯å¦ä¸ºHTTPèµ„æºï¼ˆé€šè¿‡æ£€æŸ¥è·¯å¾„æ˜¯å¦ä»¥httpå¼€å¤´ï¼‰
+        let isHttp = assets?.p?.startsWith('http');
+
+        if (isHttp) {
+            // æ„é€ ç›®æ ‡æ–‡ä»¶åï¼ˆassets.id + '.png'ï¼‰
+            const targetFilename = `${assets.id}.png`;
+            const fileIndex = filenames.indexOf(targetFilename);
+
+            // æ‰¾åˆ°åŒ¹é…æ–‡ä»¶æ—¶æ‰§è¡Œåˆ é™¤
+            if (fileIndex !== -1) {
+                if (isSync) {
+                    unlinkSync(path + filenames[fileIndex]);
+                } else {
+                    unlink(path + filenames[fileIndex]);
+                }
+            }
+        }
+    }
+
+    /**
+     * æ ¹æ®è·¯å¾„åˆ é™¤æ–‡ä»¶æˆ–ç›®å½•
+     * @param {string} path - åŸºç¡€ç›®å½•è·¯å¾„
+     * @param {string} filename - æ–‡ä»¶/ç›®å½•å
+     * @param {boolean} isSync - æ˜¯å¦åŒæ­¥æ“ä½œæ ‡å¿—
+     */
+    function rmDirByPath(path, filename, isSync) {
+        let dirPath = path + '/' + filename;
+        // åˆ¤æ–­æ˜¯å¦æ–‡ä»¶å¤¹
+        try {
+            let isDirectory = fs.statSync(dirPath).isDirectory();
+            if (isDirectory) {
+                rmdirSync(dirPath);
+            } else {
+                if (isSync) {
+                    unlinkSync(dirPath);
+                } else {
+                    unlink(dirPath);
+                }
+            }
+        } catch (err) {
+            LogUtil.error('Method rmDirByPath execute error: ' + JSON.stringify(err));
+        }
+    }
+
+    /**
+     *  åˆ é™¤ç›®å½•
+     * @param path - ç›®æ ‡æ ¹ç›®å½•è·¯å¾„
+     * @param isSync - æ˜¯å¦åŒæ­¥æ“ä½œæ ‡å¿—
+     * @param jsonObj - èµ„æºæè¿°å¯¹è±¡ï¼ˆå¯é€‰ï¼‰
+     */
+    function rmdir(path, isSync, jsonObj) {
+        let filenames = listFileSyncs(path);
+        if (jsonObj) {
+            for (let i = 0; i < jsonObj.assets.length; i++) {
+                rmAssetsDir(path, jsonObj.assets[i], filenames, isSync);
+            }
+        } else {
+            for (let i = 0; i < filenames.length; i++) {
+                rmDirByPath(path, filenames[i], isSync);
+            }
+        }
+    }
+
+    moduleOb.registerAnimation = registerAnimation;
+    moduleOb.loadAnimation = loadAnimation;
+    moduleOb.setSpeed = setSpeed;
+    moduleOb.setDirection = setDirection;
+    moduleOb.play = play;
+    moduleOb.pause = pause;
+    moduleOb.stop = stop;
+    moduleOb.togglePause = togglePause;
+    moduleOb.searchAnimations = searchAnimations;
+    moduleOb.resize = resize;
+    moduleOb.clearFileCache = clearFileCache;
+    moduleOb.clearFileCacheSync = clearFileCacheSync;
+    moduleOb.goToAndStop = goToAndStop;
+    moduleOb.goToAndPlay = goToAndPlay;
+    moduleOb.destroy = destroy;
+    moduleOb.freeze = freeze;
+    moduleOb.unfreeze = unfreeze;
+    moduleOb.setVolume = setVolume;
+    moduleOb.mute = mute;
+    moduleOb.unmute = unmute;
+    moduleOb.getRegisteredAnimations = getRegisteredAnimations;
+    moduleOb.setPackageName = setPackageName;
+    moduleOb.setContentMode = setContentMode;
+    moduleOb.setFrameRate = setFrameRate;
+    moduleOb.getFrameRate = getFrameRate;
+    moduleOb.bindContext2dToCoordinator = _coordinator.bindContext2dToCoordinator.bind(_coordinator);
+    moduleOb.unbindContext2dFromCoordinator = _coordinator.unbindContext2dFromCoordinator.bind(_coordinator);
+    moduleOb.setAttachedCanvasHasVisibleArea = _coordinator.setAttachedCanvasHasVisibleArea.bind(_coordinator);
+
+    return moduleOb;
+}());
+
+export default animationManager;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜÏ‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘ÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationManager.js‘Úßimport createTag from '../utils/helpers/html_elements';
+import AnimationItem from './AnimationItem';
+import displaySync from '@ohos.graphics.displaySync'
+import animator from '@ohos.animator';
+import fs from '@ohos.file.fs';
+import bez from '../utils/bez';
+import { LogUtil } from '../utils/LogUtil'
+import deviceInfo from '@ohos.deviceInfo';
+import { isExistNetworkAssets } from '../utils/DataUtil';
+import { unlinkSync, unlink, rmdirSync, listFileSyncs } from '../utils/FileUtil'
+
+let _nextIdInCoordinator = 0;
+const Coordinator = function() {
+    this._context2dShadows = new WeakMap();
+    this._context2dCallbacks = new WeakMap();
+    this._canvasShadows = new WeakMap();
+};
+
+Coordinator.prototype._getLogTag = function() {
+    return '<Coordinator>';
+};
+
+Coordinator.prototype._getOrCreateCanvasShadow = function(canvas) {
+    if (!canvas) {
+        return {};
+    }
+    let canvasShadow = this._canvasShadows.get(canvas);
+    if (canvasShadow) {
+        return canvasShadow;
+    }
+    canvasShadow = {
+        canvas, // G.OBJ.03 æ¨èåœ¨å¯¹è±¡å­—é¢é‡ä¸­ä½¿ç”¨æ–¹æ³•ç®€å†™å’Œå±æ€§ç®€å†™
+        status: {
+            hasArea: undefined,
+        },
+        context2dShadow: undefined,
+    };
+    this._canvasShadows.set(canvas, canvasShadow);
+
+    // ä»¥ä¸‹2ä¸ªæ¥å£æœªæ”¯æŒé“¾å¼è°ƒç”¨, æ­¤å¤„æ³¨å†Œæœ‰å¯èƒ½ä¼šè¦†ç›–æ­¤å‰å…¶å®ƒå¤„ç†é€»è¾‘æ‰€æ³¨å†Œçš„å¤„ç†é€»è¾‘. å½“ç„¶å…¶å®ƒå¤„ç†é€»è¾‘ä¹Ÿå¯èƒ½å½±å“coordinatorçš„è¡Œä¸º.
+    // åº”é¿å…ä¸åŒçš„å¤„ç†é€»è¾‘åŒæ—¶é’ˆå¯¹åŒä¸€ä¸ªcanvasèŠ‚ç‚¹è¿›è¡Œæ³¨å†Œ. æ­¤å¤„è¾“å‡ºæ—¥å¿—ä¾¿äºç»´æµ‹.
+    LogUtil.warn(`${this._getLogTag()} coordinator register canvas(${canvas.getUniqueId()}) callbacks.`);
+    canvas.commonEvent.setOnVisibleAreaApproximateChange(
+        { ratios: [0], expectedUpdateInterval: 500 },
+        this._onVisibleAreaApproximateChange.bind(this, canvas));
+
+    return canvasShadow;
+};
+
+Coordinator.prototype._isNodeAndAncestorVisible = function (node) {
+    if (!node) {
+        return false;
+    }
+
+    let isVisible = node.isVisible();
+    let parent = node.getParent();
+    while (parent && isVisible) {
+        isVisible = parent.isVisible();
+        parent = parent.getParent();
+    }
+    return isVisible;
+};
+
+Coordinator.prototype._notifyAnimationCanvasHasArea = function (animation, hasArea, context2dShadow) {
+    /*
+     * å½±å­æ•°æ®çš„æ„å»ºæ˜¯ä¾èµ–å„ç§å›è°ƒè¢«ä¾æ¬¡è°ƒç”¨ï¼Œæ‰èƒ½é€æ­¥å®Œæˆ. åœ¨è¢«æ„å»ºå‡ºæ¥ä¹‹å‰, å­˜åœ¨ canvas çŠ¶æ€æœªçŸ¥çš„æƒ…å½¢
+     */
+    if (!animation) {
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    let canvasUniqueId = canvas?.getUniqueId();
+    let _hasArea = hasArea;
+    if (_hasArea !== true && _hasArea !== false) {
+        // canvasèŠ‚ç‚¹å¯è§æ€§çŠ¶æ€æœªçŸ¥, æ­¤æ—¶canvaså¯èƒ½æ—©å·²åˆ›å»ºè¿‡, ä¹Ÿå¯èƒ½åˆšåˆšå¼€å§‹åˆ›å»º, é€šè¿‡è·å–ä¸€æ¬¡å½“å‰çŠ¶æ€è¿›è¡Œè¾…åŠ©åˆ¤æ–­
+        let isAttached = canvas?.isAttached();
+        let isVisible = this._isNodeAndAncestorVisible(canvas);
+        LogUtil.warn(`${this._getLogTag()} canvas(${canvasUniqueId}) is ${isAttached ? 'attached to' :
+            'detached from'} UItree and ${isVisible ? 'visible' : 'invisible'}`);
+        if (!isAttached || !isVisible) {
+            _hasArea = false;
+        } else if (context2dShadow.option.preferredNoArea) {
+            LogUtil.info(`${this._getLogTag()} regard canvas(${canvasUniqueId}) as no visible area.`);
+            _hasArea = false;
+        }
+    }
+
+    if (_hasArea === true || _hasArea === false) {
+        animation.onCanvasHasVisibleArea(canvasUniqueId, _hasArea);
+    } else {
+        // å³ä¾¿canvasæ˜¯åœ¨æ ‘ä¸Šä¸”visible, ä¹Ÿä¸æ„å‘³ç€èŠ‚ç‚¹æ˜¯å…·å¤‡å¯è§é¢ç§¯çš„, ä¸ºä¿æŒå‰å‘å…¼å®¹, æ­¤æ—¶ä¸å¯¹animationåšä¸»åŠ¨é€šçŸ¥
+        LogUtil.warn(`${this._getLogTag()} do NOT notify animation(${animation.animationID}) for indeterminate canvas(${canvasUniqueId}) status.`);
+    }
+};
+
+Coordinator.prototype._onVisibleAreaApproximateChange = function(canvas, isVisible) {
+    let uniqueId = canvas?.getUniqueId();
+    LogUtil.info(`${this._getLogTag()} canvas(${uniqueId}) visible area changed to ${isVisible}.`);
+    if (!canvas) {
+        return;
+    }
+    let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+    canvasShadow.status.hasArea = isVisible;
+
+    this._notifyAnimationCanvasHasArea(canvasShadow.context2dShadow?.animation, isVisible,
+        canvasShadow.context2dShadow);
+};
+
+Coordinator.prototype._onContext2dAttachedToCanvas = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    let { canvas } = context2d;
+    let canvasUniqueId = canvas?.getUniqueId();
+    let context2dShadow = this._context2dShadows.get(context2d);
+    LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow?._id}) attached to canvas(${canvasUniqueId})`);
+    if (!canvas) {
+        return;
+    }
+    let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+    canvasShadow.context2dShadow = context2dShadow;
+
+    if (context2dShadow?.canvasShadow !== canvasShadow) {
+        context2dShadow.canvasShadow = canvasShadow;
+    } else {
+        LogUtil.warn(`${this._getLogTag()} context2d(${context2dShadow?._id}) already attached to the same canvas(${canvasUniqueId}).`);
+    }
+
+    this._onVisibleAreaApproximateChange(canvasShadow.canvas, canvasShadow.status.hasArea);
+};
+
+Coordinator.prototype._onContext2dDetachedFromCanvas = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    let canvas = context2dShadow?.canvasShadow?.canvas;
+    let canvasUniqueId = canvas?.getUniqueId();
+    LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow?._id}) detached from canvas(${canvasUniqueId})`);
+
+    this._notifyAnimationCanvasHasArea(context2dShadow?.animation, false, context2dShadow);
+
+    if (canvas) {
+        let canvasShadow = this._getOrCreateCanvasShadow(canvas);
+        if (canvasShadow) {
+            canvasShadow.context2dShadow = null;
+        }
+    }
+
+    if (context2dShadow) {
+        context2dShadow.canvasShadow = null; // null:ç¡®å®šè§£ç»‘, undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+    }
+};
+
+Coordinator.prototype._getOrCreateContext2dCallback = function (context2d) {
+    if (!context2d) {
+        return {};
+    }
+    let callbacks = this._context2dCallbacks.get(context2d);
+    if (!callbacks) {
+        // _onContext2dAttachedToCanvas éœ€è¦ä¸€ä¸ªé¢å¤–çš„context2dä½œä¸ºå‚æ•°, éœ€é€šè¿‡bindä¼ é€’è¿›å»
+        callbacks = {
+            onContext2dAttachedToCanvas: this._onContext2dAttachedToCanvas.bind(this, context2d),
+            onContext2dDetachedFromCanvas: this._onContext2dDetachedFromCanvas.bind(this, context2d),
+        };
+        this._context2dCallbacks.set(context2d, callbacks);
+    }
+    return callbacks;
+};
+
+Coordinator.prototype.setAttachedCanvasHasVisibleArea = function(context2d, hasArea) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        LogUtil.warn(`${this._getLogTag()} context2d has not yet bound to coordinator.`);
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    if (canvas) {
+        LogUtil.info(`${this._getLogTag()} fix visible area of canvas(${canvas.getUniqueId()})` +
+            ` attached to context2d(${context2dShadow._id}) to ${hasArea}`);
+        this._onVisibleAreaApproximateChange(canvas, hasArea);
+    } else {
+        LogUtil.warn(`${this._getLogTag()} context2d(${context2dShadow._id}) has no canvas attached.`);
+    }
+};
+
+Coordinator.prototype.isContext2dBoundToCoordinator = function (context2d) {
+    if (!context2d) {
+        return false;
+    }
+    return this._context2dShadows.has(context2d);
+};
+
+Coordinator.prototype.bindContext2dToCoordinator = function(context2d) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (context2dShadow) {
+        LogUtil.info(`${this._getLogTag()} context2d(${context2dShadow._id}) already attached to coordinator.`);
+        context2dShadow.option.preferredNoArea = true;
+        return;
+    }
+    this.internalBindContext2dToCoordinator(context2d, true);
+};
+
+Coordinator.prototype.internalBindContext2dToCoordinator = function (context2d, preferredNoArea) {
+    if (deviceInfo.sdkApiVersion < 13 || !context2d?.on) {
+        // å½±å­æ•°æ®å¼ºä¾èµ–context2dçš„onæ¥å£, åªæœ‰API 13+æ‰å…·å¤‡.
+        LogUtil.error(`${this._getLogTag()} API level(${deviceInfo.sdkApiVersion}) is too low.`);
+        return;
+    }
+
+    let context2dShadow = {
+        _id: _nextIdInCoordinator++,
+        context2d,
+        option: {
+            preferredNoArea, // G.OBJ.03 æ¨èåœ¨å¯¹è±¡å­—é¢é‡ä¸­ä½¿ç”¨æ–¹æ³•ç®€å†™å’Œå±æ€§ç®€å†™
+        },
+        animation: undefined, // undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+        canvasShadow: undefined, // undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+    };
+    this._context2dShadows.set(context2d, context2dShadow);
+    LogUtil.info(`${this._getLogTag()} bind context2d(${context2dShadow._id}) to coordinator${preferredNoArea ?
+        ' with no area preferred' : ''}.`);
+
+    let callbacks = this._getOrCreateContext2dCallback(context2d);
+    context2d.on('onAttach', callbacks.onContext2dAttachedToCanvas);
+    context2d.on('onDetach', callbacks.onContext2dDetachedFromCanvas);
+
+    let { canvas } = context2d; // G.MET.11 å»ºè®®ä½¿ç”¨å‚æ•°çš„è§£æ„
+    if (canvas) {
+        /* æ­¤æ—¶context2dæœ‰ä¸€ä¸ªå…³è”åˆ°çš„canvas. å®ƒä¸context2dæœ‰å¯èƒ½æ˜¯attachedçš„, ä¹Ÿæœ‰å¯èƒ½æ˜¯æ›¾ç»attachedè¿‡ä½†åˆè¢«detachedäº†.
+         * ä¸ºé¿å…è¯¯åˆ¤é€ æˆæœ¬è¯¥æ´»åŠ¨è€Œæœªæ´»åŠ¨, æ­¤å¤„è§†å…¶ä¸ºattachedçš„canvasæ¥å¤„ç†, å¹¶åšä¸€æ¬¡å¿…è¦çš„"è¡¥è°ƒ"
+         */
+        LogUtil.warn(`${this._getLogTag()} canvas(${canvas.getUniqueId()}) indeterminate attached or not, treat it as attached.`);
+        callbacks.onContext2dAttachedToCanvas();
+    } else {
+        context2dShadow.canvasShadow = null;
+    }
+};
+
+Coordinator.prototype.unbindContext2dFromCoordinator = function (context2d) {
+    if (!context2d) {
+        return;
+    }
+    if (deviceInfo.sdkApiVersion < 13) {
+        // å½±å­æ•°æ®å¼ºä¾èµ–context2dçš„onæ¥å£, åªæœ‰API 13+æ‰å…·å¤‡.
+        LogUtil.error(`${this._getLogTag()} API level(${deviceInfo.sdkApiVersion}) is too low.`);
+        return;
+    }
+
+    let context2dShadow = this._context2dShadows.get(context2d);
+    LogUtil.info(`${this._getLogTag()} unbind context2d(${context2dShadow?._id}) from coordinator`);
+
+    if (!context2dShadow) {
+        return;
+    }
+
+    let canvas = context2dShadow.canvasShadow?.canvas;
+    if (canvas) {
+        // è¿™é‡Œåº”è¯¥å»è§£æ³¨å†Œcanvasä¸Šçš„å›è°ƒ, ä½†è§£æ³¨å†Œæ¥å£å­˜åœ¨bug, å†æ¬¡æ³¨å†Œæ—¶æ¥å£ä¼šå¤±æ•ˆ.
+        // è€ƒè™‘åˆ°canvasèŠ‚ç‚¹é”€æ¯æ—¶å›è°ƒè‡ªç„¶ä¼šè¢«è§£æ‰, æ•…è¿™é‡Œå¿½ç•¥ç›¸å…³çš„è§£æ³¨å†Œå¤„ç†, ç›´æ¥æ¸…ç†cache.
+        this._canvasShadows.delete(canvas);
+    }
+
+    let callbacks = this._context2dCallbacks.get(context2d);
+    if (callbacks && context2d?.off) {
+        context2d.off('onAttach', callbacks.onContext2dAttachedToCanvas);
+        context2d.off('onDetach', callbacks.onContext2dDetachedFromCanvas);
+    }
+
+    this._context2dShadows.delete(context2d);
+};
+
+Coordinator.prototype.attachAnimationToContext2d = function (context2d, animation) {
+    if (!context2d) {
+        return;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        LogUtil.warn(`${this._getLogTag()} context2d must be bound to coordinator firstly. `);
+        return;
+    }
+
+    if (context2dShadow.animation === animation) {
+        LogUtil.warn(`${this._getLogTag()} animation(${animation?.animationID}) already attached to context2d(${context2dShadow._id}).`);
+        return;
+    }
+
+    context2dShadow.animation = animation;
+
+    let { canvasShadow } = context2dShadow;
+    if (canvasShadow) {
+        this._onVisibleAreaApproximateChange(canvasShadow.canvas, canvasShadow.status.hasArea);
+    }
+};
+
+Coordinator.prototype.detachAnimationFromContext2d = function (context2d) {
+    if (!context2d) {
+        return null;
+    }
+    let context2dShadow = this._context2dShadows.get(context2d);
+    if (!context2dShadow) {
+        return null;
+    }
+
+    let { animation } = context2dShadow; // G.MET.11 å»ºè®®ä½¿ç”¨å‚æ•°çš„è§£æ„
+    context2dShadow.animation = null; // null:ç¡®å®šè§£ç»‘, undefined:ä¸ç¡®å®šæ˜¯å¦ç»‘å®š
+
+    return animation;
+};
+
+/**
+ * isSkipFrameByOwnéœ€è¦åœ¨åˆå§‹åŒ–æ—¶ç»™å‡º, ä¸èƒ½åœ¨è¿è¡Œæ—¶åŠ¨æ€æ”¹å˜.
+ * è‹¥è¦æ”¯æŒåŠ¨æ€æ”¹å˜, éœ€è¦åšåˆ°åŠ¨æ€å»é™¤displaysyncçš„æŠ•ç¥¨, æš‚æ— åˆé€‚æ¥å£.
+ * é”€æ¯åé‡å»ºdisplaysyncæ˜¯ä¸ªå¯é€‰é¡¹, ä½†æ¶‰åŠåˆ°å„ç§çŠ¶æ€ç®¡ç†è¿‡äºå¤æ‚.
+ * è¯¥åœºæ™¯å¹¶ä¸å¸¸è§, æ•…æš‚ä¸å®ç°.
+ **/
+const _DURATION_BY_MS_ = 20000;
+const _ALLOWABLE_ERROR_BY_MS_ = 1.5; // timestampçš„æ—¶é—´ç²¾åº¦ä¸º1ä¸ªms, æ•…è®©å®¹è®¸è¯¯å·®ç¨å¤§äºè¯¥å€¼
+const _LEAD_BY_MS_ = 5; // æå‰post frameCallback çš„æ—¶é—´, è¯¥å€¼ä¸èƒ½å¤ªå°ä»¥è‡³äºé”™è¿‡vsync, ä¹Ÿä¸å®œå¤ªå¤§å¯¼è‡´å¸§ç‡è¿‡é«˜.
+let _nextIdInLooper = 0;
+const Looper = function(uiContext, animations, playFrameCallback, isSkipFrameByOwn) {
+    this._id = _nextIdInLooper++;
+    this._uiContext = uiContext;
+    this._animations = animations;
+    this._playingAnimationsNum = 0;
+    this._looperStopped = true;
+    this._playingFrameRate = 0;
+    this._looperType = null;
+    this._displaySync = null;
+    this._frameCallback = undefined;
+    this._frameCallbackPosted = 0;
+    this._animator = null;
+    this._monotonicTimeStampInMs = 0;
+    this._lastAnimatorProgress = 0;
+    this._lastOnFrameTs = 0;
+    this._lastPlayedFrameTs = 0;
+    this._expectedFrameTs = 0;
+    this._periodByMs = 0;
+    this._playFrameCallback = playFrameCallback;
+    this._setExpectedFrameRateRangeWrapper = null;
+    this._isSkipFrameByOwn = isSkipFrameByOwn;
+    this.__performance = {
+        lastTimestamp: 0,
+        frames: 0,
+        janks: 0,
+        maxPeriod: 0,
+    };
+
+    if (isSkipFrameByOwn) {
+        if (this._initFrameCallbackLooper()) {
+            // ä¸»åŠ¨è·³å¸§æ—¶ä¼˜é€‰frameCallback
+            return;
+        }
+    }
+
+    if (this._initDisplaySyncLooper()) {
+        return;
+    }
+
+    // fallback to animator
+    this._initAnimatorLooper();
+};
+
+Looper.prototype._getLogTag = function() {
+    if (this._uiContext?.getHostContext()?.abilityInfo?.name) {
+        return `<Looper@${this._uiContext.getHostContext().abilityInfo.name}(${this._id})>`;
+    } else {
+        return `<Looper(${this._id})>`;
+    }
+};
+
+Looper.prototype._skippingFrame = function (timestamp) {
+    if (this._periodByMs === 0) {
+        return false;
+    }
+
+    let supplyingPeriod = 0;
+    if (this._lastOnFrameTs !== 0) {
+        supplyingPeriod = timestamp - this._lastOnFrameTs;
+    }
+
+    let phaseOffset = this._expectedFrameTs - timestamp;
+    if ((phaseOffset < 0 && phaseOffset > -_ALLOWABLE_ERROR_BY_MS_) ||
+        (phaseOffset > 0 && phaseOffset < _ALLOWABLE_ERROR_BY_MS_)) {
+        phaseOffset = 0; // åœ¨å®¹è®¸è¯¯å·®èŒƒå›´å†…åˆ™å¿½ç•¥åå·®
+    }
+
+    let halfPeriod = supplyingPeriod >> 1;
+    if (phaseOffset > (halfPeriod + _ALLOWABLE_ERROR_BY_MS_)) {
+        return true; // åå·®ç¦»å½“å‰vsyncè¿‡å¤§, ä¸»åŠ¨è·³è¿‡æœ¬å¸§
+    }
+
+    // è®¡ç®—ä¸‹ä¸€å¸§æ—¶é—´æˆ³. æ³¨æ„jsçš„å–æ¨¡è¿ç®—ä¸å…¶å®ƒè¯­è¨€ä¸åŒ, ä¼šå‡ºç°è´Ÿçš„ä½™æ•°
+    this._expectedFrameTs = timestamp + phaseOffset % this._periodByMs + this._periodByMs;
+
+    return false;
+};
+
+Looper.prototype._baseOnframe = function (timestamp, displaySynced) {
+    if (this._isSkipFrameByOwn && this._skippingFrame(timestamp)) {
+        return;
+    }
+
+    this._playFrameCallback(this._uiContext, timestamp, displaySynced);
+
+    this._performancePeriodically(timestamp);
+
+    this._lastPlayedFrameTs = timestamp;
+};
+
+Looper.prototype._performancePeriodically = function (timestamp) {
+    let _DURATION_ = 2_000; // heartbeat every <_DURATION_>ms elapsed
+
+    try {
+        this.__performance.frames++;
+
+        let supplyingPeriod = timestamp - this._lastPlayedFrameTs;
+        if (supplyingPeriod > this._periodByMs + _ALLOWABLE_ERROR_BY_MS_ + _ALLOWABLE_ERROR_BY_MS_) {
+            this.__performance.janks++;
+        }
+
+        if (supplyingPeriod > this.__performance.maxPeriod) {
+            this.__performance.maxPeriod = supplyingPeriod;
+        }
+
+        let elapsedMs = timestamp - this.__performance.lastTimestamp;
+        if (elapsedMs > _DURATION_) {
+            this.__performance.frames = 0;
+            this.__performance.janks = 0;
+            this.__performance.maxPeriod = 0;
+            this.__performance.lastTimestamp = timestamp;
+        }
+    } catch (e) {
+        // do nothing. performing does NOT matter
+    }
+};
+
+Looper.prototype._baseFirst = function () {
+    this._monotonicTimeStampInMs = 0;
+    this._lastPlayedFrameTs = 0;
+    this._expectedFrameTs = 0;
+};
+
+Looper.prototype._baseSetExpectedFrameRateRange = function (playingFrameRate) {
+    LogUtil.info(`${this._getLogTag()} ${this._looperType} running at ${playingFrameRate} HZ`);
+    this._periodByMs = 1000 / playingFrameRate;
+
+    if (!this._isSkipFrameByOwn) {
+        if (this._setExpectedFrameRateRangeWrapper) {
+            this._setExpectedFrameRateRangeWrapper({ min: 0, max: 120, expected: playingFrameRate });
+        } else {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} has no displaySync. no frame rate set.`);
+        }
+    } else {
+        // ä¸åšæŠ•ç¥¨, é¿å…æ‹‰ä½uiå¸§ç‡
+    }
+};
+
+Looper.prototype._initFrameCallbackLooper = function () {
+    let apiVersion = deviceInfo?.sdkApiVersion;
+    if (apiVersion >= 13 && this._uiContext) {
+        /* å°½ç®¡FrameCallbackæœºåˆ¶åœ¨API 12å·²æ”¯æŒ, ä½†ç”±äºå®ƒæ‰€ä¾èµ–çš„uiContextéœ€è¦ä»context2dæ‰€å…³è”çš„canvasèŠ‚ç‚¹ä¸­è·å–,
+         * è€ŒAPI 13åŠä»¥ä¸Šæ‰æ”¯æŒä»context2dä¸­è·å–canvasèŠ‚ç‚¹, æ•…åªèƒ½åœ¨API 13åŠä»¥ä¸Šæ‰å¯ä»¥ä½¿èƒ½frameCallback
+         */
+        this._frameCallback = {
+            onFrame: (timestamp) => {
+                this._frameCallbackPosted--; // æ¯æ¬¡è¿›å…¥å›è°ƒå‡æ„å‘³ç€æ¶ˆè´¹æ‰1æ¬¡frameCallback
+
+                if (this._looperStopped) {
+                    return;
+                }
+
+                // ç¡®ä¿æœ‰ä¸”ä»…æœ‰1ä¸ªframeCallbackè¢«poståˆ°ç®¡çº¿ä¸Š, é¿å…frameCallbackå †ç§¯
+                if (this._uiContext && this._frameCallbackPosted <= 0) {
+                    this._uiContext.postDelayedFrameCallback(this._frameCallback, this._periodByMs - _LEAD_BY_MS_);
+                    this._frameCallbackPosted++;
+                }
+
+                this._lastOnFrameTs = this._monotonicTimeStampInMs;
+                this._monotonicTimeStampInMs = Math.floor(timestamp / 1000_000);
+
+                this._baseOnframe(this._monotonicTimeStampInMs, true);
+            },
+        };
+        LogUtil.info(`${this._getLogTag()} frameCallback created.`);
+
+        this._exportApiByFrameCallback();
+
+        return true;
+    } else {
+        LogUtil.warn(`${this._getLogTag()} api version(${apiVersion}) is too low. frameCallback is disabled.`);
+    }
+
+    return false;
+};
+
+Looper.prototype._exportApiByFrameCallback = function() {
+    // å¯¼å‡ºå¤–éƒ¨å¯è°ƒç”¨æ–¹æ³•(å†…éƒ¨æ–¹æ³•ä»¥"_"å¼€å¤´)
+    this._looperType = 'frameCallback';
+
+    this.first = function () {
+        this._baseFirst();
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first`);
+    };
+
+    this.start = function () {
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} start`);
+        if (this._uiContext) {
+            if (this._frameCallbackPosted <= 0) {
+                // ä¸èƒ½æ— æ¡ä»¶post. å¦‚æœå·²æœ‰callbackè¢«posted, å†æ¬¡postä¼šé€ æˆframeCallbackå †ç§¯å¯¼è‡´é«˜å¸§ç‡
+                this._uiContext.postFrameCallback(this._frameCallback);
+                this._frameCallbackPosted++;
+            }
+            this._looperStopped = false;
+        } else {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} no uicontext, frameCallback could not work.`);
+        }
+    };
+
+    this.stop = function () {
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} stop`);
+        this._looperStopped = true;
+    };
+
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype._initDisplaySyncLooper = function () {
+    try {
+        this._displaySync = displaySync.create();
+        this._displaySync.on('frame', (frameInfo) => {
+            if (this._looperStopped) {
+                return;
+            }
+
+            this._lastOnFrameTs = this._monotonicTimeStampInMs;
+            this._monotonicTimeStampInMs = Math.floor(frameInfo.timestamp / 1000_000);
+
+            this._baseOnframe(this._monotonicTimeStampInMs, true);
+        });
+        LogUtil.info(`${this._getLogTag()} displaySync created.`);
+
+        this._exportApiByDisplaySync();
+
+        return true;
+    } catch (e) {
+        LogUtil.info(`${this._getLogTag()} no displaySync. API version(${deviceInfo?.sdkApiVersion}) may be too low: ${e.message}`);
+    }
+
+    return false;
+};
+
+Looper.prototype._exportApiByDisplaySync = function() {
+    // å¯¼å‡ºå¤–éƒ¨å¯è°ƒç”¨æ–¹æ³•(å†…éƒ¨æ–¹æ³•ä»¥"_"å¼€å¤´)
+    this._looperType = 'displaySync';
+
+    this.first = function () {
+        this._baseFirst();
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first`);
+    };
+
+    this.start = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT start cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} start`);
+        this._displaySync.start();
+        this._looperStopped = false;
+    };
+
+    this.stop = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT stop cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} stop`);
+        this._looperStopped = true;
+        this._displaySync.stop();
+    };
+
+    this._setExpectedFrameRateRangeWrapper = this._displaySync.setExpectedFrameRateRange.bind(this._displaySync);
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype._initAnimatorLooper = function () {
+    let options = {
+        duration: _DURATION_BY_MS_,
+        easing: 'linear',
+        delay: 0,
+        fill: 'forwards',
+        direction: 'normal',
+        iterations: -1,
+        begin: 0,
+        end: 1
+    };
+    this._animator = animator.create(options);
+    this._registerCallbackForAnimator();
+    LogUtil.info(`${this._getLogTag()} animator created.`);
+
+    this._exportApiByAnimator();
+
+    return true;
+};
+
+Looper.prototype._registerCallbackForAnimator = function() {
+    let sdkApiVersion = deviceInfo?.sdkApiVersion;
+
+    let oncancel = () => {
+        this._lastAnimatorProgress = 0;
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} oncancel.`);
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onCancel = oncancel;
+    } else {
+        this._animator.oncancel = oncancel;
+    }
+
+    let onfinish = () => {
+        this._lastAnimatorProgress = 0;
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} onfinish.`);
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onFinish = onfinish;
+    } else {
+        this._animator.onfinish = onfinish;
+    }
+
+    let onframe = (progress) => {
+        if (this._looperStopped) {
+            // animator.cancel -> onframe -> animator.oncancel
+            return;
+        }
+        // åœ¨æ¯ä¸€æ¬¡å¸§åŠ¨ç”»å›è°ƒæ—¶ï¼Œå¿½ç•¥ç³»ç»Ÿæ—¶é—´ï¼Œä»…ä»¥åŠ¨ç”»æ­¥è¿›æ¥è®¡ç®—ä¸‹ä¸€æ¬¡æ—¶é—´æˆ³ï¼Œé¿å…æ—¶é—´è°ƒæ•´å¼•èµ·çš„è·³å˜
+        let positiveProgress = progress - this._lastAnimatorProgress + 1;
+        let modularProgress = positiveProgress - (positiveProgress >>> 0); // é«˜æ•ˆåœ°å–å‡ºå°æ•°éƒ¨åˆ†, ç›¸å½“äºå¯¹1å–æ¨¡
+        let step = (_DURATION_BY_MS_ * modularProgress) >>> 0; // Zero-fill right shift for truncation to integer
+        if (step > 0) {
+            if (step > this._periodByMs + _ALLOWABLE_ERROR_BY_MS_ + _ALLOWABLE_ERROR_BY_MS_) {
+                let logInfo =
+                    `step(${step}) is too significant. progress(${progress
+                    }), last progress(${this._lastAnimatorProgress
+                    }), modular progress(${modularProgress
+                    })`;
+                LogUtil.warn(`${this._getLogTag()} ${this._looperType} ${logInfo}`);
+            }
+
+            this._lastOnFrameTs = this._monotonicTimeStampInMs;
+            this._monotonicTimeStampInMs += step;
+            this._lastAnimatorProgress = progress;
+
+            this._baseOnframe(this._monotonicTimeStampInMs, false);
+        }
+    };
+    if (sdkApiVersion >= 12) {
+        this._animator.onFrame = onframe;
+    } else {
+        this._animator.onframe = onframe;
+    }
+};
+
+Looper.prototype._exportApiByAnimator = function() {
+    this._looperType = 'animator';
+
+    this.first = function () {
+        this._baseFirst();
+        this._lastAnimatorProgress = 0;
+        this._monotonicTimeStampInMs = Math.floor(Date.now());
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} first: ${this._monotonicTimeStampInMs}`);
+    };
+
+    this.start = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT start cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} play`);
+        this._animator.play();
+        this._looperStopped = false;
+    };
+
+    this.stop = function () {
+        if (this._uiContext.getHostContext() !== getContext()) {
+            LogUtil.warn(`${this._getLogTag()} ${this._looperType} could NOT stop cause context not matched`);
+            return;
+        }
+        LogUtil.info(`${this._getLogTag()} ${this._looperType} cancel`);
+        this._looperStopped = true;
+        // do not call '_animator.finish' function which will further call animator.onframe causing stack overflow.
+        this._animator.cancel();
+    };
+
+    this._setExpectedFrameRateRangeWrapper = this._animator.setExpectedFrameRateRange?.bind(this._animator);
+    this.setExpectedFrameRateRange = function (playingFrameRate) {
+        this._baseSetExpectedFrameRateRange(playingFrameRate);
+    };
+};
+
+Looper.prototype.onAnimationActive = function(animItem) {
+    if (animItem?.getFrameRate() > this._playingFrameRate) {
+        // æœ‰æ›´é«˜å¸§ç‡çš„åŠ¨ç”»æ´»åŠ¨ï¼Œéœ€è¦åˆ·æ–°å¸§ç‡
+        this.changeFrameRateIfNeeded();
+    }
+
+    this.addPlayingCount();
+};
+
+Looper.prototype.onAnimationIdle = function(animItem) {
+    this.subtractPlayingCount();
+
+    if (animItem?.getFrameRate() >= this._playingFrameRate) {
+        // æœ€é«˜å¸§ç‡çš„åŠ¨ç”»æš‚åœï¼Œéœ€è¦åˆ·æ–°ä¸ºç¬¬äºŒé«˜çš„å¸§ç‡å€¼
+        this.changeFrameRateIfNeeded();
+    }
+};
+
+Looper.prototype.pickMaxFrameRate = function() {
+    let maxUserFr = animationManager?.getFrameRate();
+    if (maxUserFr > 0 && maxUserFr <= 120) {
+        return maxUserFr; // user already set frame rate. so ignore content fr for better performance
+    }
+
+    let maxFrameRate = 0;
+    let len = this._animations?.length;
+    for (let i = 0; i < len; i++) {
+        let animItem = this._animations[i]?.animation;
+        let uiContext = animItem?.getUiContext();
+        if ((!uiContext || (uiContext === this._uiContext)) && !animItem?._idle) {
+            let fr = animItem?.getFrameRate();
+            LogUtil.info(`${this._getLogTag()} check fr from '${animItem?.name}(${animItem?.animationID})' with ${fr} fps.`);
+            if (fr > maxFrameRate) {
+                maxFrameRate = fr;
+            }
+        }
+    }
+    return maxFrameRate;
+};
+
+Looper.prototype.addPlayingCount = function() {
+    this._playingAnimationsNum += 1;
+    if (this._playingAnimationsNum > 0) {
+        this.activate();
+    }
+};
+
+Looper.prototype.subtractPlayingCount = function() {
+    this._playingAnimationsNum -= 1;
+    if (this._playingAnimationsNum <= 0) {
+        this._playingAnimationsNum = 0;
+        this.deactivate();
+    }
+};
+
+Looper.prototype.activate = function() {
+    if (this._playingAnimationsNum > 0 && this._looperStopped) {
+        LogUtil.info(`${this._getLogTag()} activate.`);
+        this.first();
+        this.start();
+    }
+};
+
+Looper.prototype.deactivate = function() {
+    if (!this._looperStopped) {
+        LogUtil.info(`${this._getLogTag()} deactivate`);
+        this._playingFrameRate = 0;
+        this.stop();
+    }
+};
+
+Looper.prototype.changeFrameRateIfNeeded = function() {
+    let maxFr = this.pickMaxFrameRate();
+    if (maxFr === 0) {
+        this.deactivate();
+        return;
+    }
+
+    if (maxFr !== this._playingFrameRate) {
+        if (maxFr > 0 && maxFr <= 120) {
+            this._playingFrameRate = maxFr;
+            this.setExpectedFrameRateRange(this._playingFrameRate);
+        }
+    }
+};
+
+const animationManager = (function(){
+    let moduleOb = {};
+    let registeredAnimations = [];
+    let _packageName = '';
+    let _userPlayingFrameRate = 0;
+    let _contextLoopers = new WeakMap();
+    let _coordinator = new Coordinator();
+
+    function _getLogTag() {
+        let abilityName = getContext()?.abilityInfo?.name;
+        if (abilityName && _packageName !== '') {
+            return `<Manager(${abilityName})@${_packageName}>`;
+        } else if (abilityName) {
+            return `<Manager(${abilityName})>`;
+        } else if (_packageName !== '') {
+            return `<Manager@${_packageName}>`;
+        } else {
+            return '<Manager>';
+        }
+    }
+
+    function _logFunc(funcName, name, onlyCurrentAbility, value) {
+        let valueDesc = '';
+        if (value) {
+            valueDesc = ` with (${value})`;
+        }
+        let nameDesc = 'all animations';
+        if (name) {
+            nameDesc = `animation named by '${name}'`;
+        }
+
+        let abilityDesc = 'in all abilities';
+        if (onlyCurrentAbility) {
+            abilityDesc = 'in current ability';
+        }
+
+        LogUtil.info(`${_getLogTag()} ${funcName}${valueDesc} for ${nameDesc} ${abilityDesc}`);
+    }
+
+    function _isNameMatched(animation, nameTarget) {
+        if (!nameTarget || animation?.name === nameTarget) {
+            return true;
+        }
+        return false;
+    }
+
+    function _isAbilityMatched(animation, onlyCurrentAbility) {
+        let context = getContext();
+        if (!onlyCurrentAbility || animation?.getUiContext()?.getHostContext() === context) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function _getAnimationUiContext(animation) {
+        /* å¤šabilitiesçš„æ”¯æŒéœ€è¦ä¾èµ–äºåœ¨å‡†ç¡®çš„contextä¸Šå¯åœLooper, ä½†displaysyncæ— æ³•å®Œæˆè¿™ä¸ªä½¿å‘½.
+         * æ¯æ¬¡å¯åŠ¨displaysyncæ—¶, startå‡ä¼šå°†displaysyncæŒ‚è½½åˆ°å½“å‰æ‰§è¡Œä¸Šä¸‹æ–‡çš„ç®¡çº¿ä¸­, è¿™ä¼šå¯¼è‡´å¯èƒ½æŒ‚é”™.
+         * ä¸ºæ­¤å¼•å…¥frameCallback, å®ƒèƒ½å¤Ÿæ”¯æŒå‘ç‰¹å®šçš„ç®¡çº¿ä¸Špostå›è°ƒ, ä»è€Œç¡®ä¿ä¸Šä¸‹æ–‡æ­£ç¡®.
+         * ä½†frameCallbackéœ€è¦ä¸€ä¸ªå‡†ç¡®çš„uicontext, å½“å‰å¹¶æ— æ¥å£æ”¯æŒ.
+         * æ­¤å¤„ç›´æ¥å€ŸåŠ©äº†animationæ‰€å…³è”canvasèŠ‚ç‚¹çš„uiContext_, è¿™æœ‰ç‚¹ç±»ä¼¼javaä¸­çš„åå°„, å±äºä¸è§„èŒƒçš„åšæ³•.
+         * FIXME:å¾…åç»­æœ‰æ­£å¼æ¥å£æ—¶éœ€åšä¸‹è°ƒæ•´.
+         * (å¼•å…¥frameCallbackçš„å¦ä¸€ä¸ªå¥½å¤„æ˜¯å¯ä»¥é™ä½è´Ÿè½½, uiçº¿ç¨‹åªåœ¨å¿…è¦æ—¶æ‰è¢«å”¤é†’)
+         */
+        return animation?.wrapper?.canvas?.uiContext_;
+    }
+
+    function _getAllLooperFromAnimations() {
+        let allLooper = new Map();
+        let len = registeredAnimations?.length;
+        for (let i = len - 1; i >= 0; i--) {
+            let context = _getAnimationUiContext(registeredAnimations[i]?.animation)?.getHostContext();
+            if (context) {
+                let looper = _contextLoopers.get(context);
+                if (looper) {
+                    allLooper.set(looper, looper);
+                }
+            }
+        }
+
+        return allLooper;
+    }
+
+    function _getLooperFromAnimation(animation) {
+        let uiContext = _getAnimationUiContext(animation);
+        if (!uiContext) {
+            LogUtil.warn(`${_getLogTag()} could NOT get current uiContext. no looper created.`);
+            return null;
+        }
+
+        return _getOrCreateLooper(uiContext);
+    }
+
+    function _getOrCreateLooper(uiContext) {
+        let looper = _contextLoopers.get(uiContext);
+        if (!!looper) {
+            return looper;
+        }
+
+        looper = new Looper(uiContext, registeredAnimations, resume, true);
+        _contextLoopers.set(uiContext, looper);
+        return looper;
+    }
+
+    // web only
+    function registerAnimation(element, animationData) {
+        if (!element) {
+            return null;
+        }
+
+        let len = registeredAnimations?.length
+        for (let i = 0; i < len; i++) {
+            if (registeredAnimations[i]?.elem !== null && registeredAnimations[i]?.elem === element) {
+                return registeredAnimations[i]?.animation;
+            }
+        }
+
+        var animItem = new AnimationItem();
+        setupAnimation(animItem, element);
+        animItem.setData(element, animationData);
+        return animItem;
+    }
+
+    // web only
+    function getRegisteredAnimations() {
+        var animations = [];
+        let len = registeredAnimations?.length;
+        for (let i = 0; i < len; i += 1) {
+            animations.push(registeredAnimations[i]?.animation);
+        }
+        return animations;
+    }
+
+    function onAnimationItemLoaded(animItem) {
+        if (!!animItem.getUiContext()) {
+            LogUtil.info(`${animItem._getLogTag()} created with ${animItem.frameRate} fps.`);
+        } else {
+            LogUtil.warn(`${animItem._getLogTag()} created with ${animItem.frameRate} fps. no UIContext.`);
+        }
+    }
+
+    function onAnimationItemDestroy(ev) {
+        let animItem = ev.target;
+        let len = registeredAnimations?.length
+        for (let i = len - 1; i >= 0; i--) {
+            if (registeredAnimations[i]?.animation === animItem) {
+                registeredAnimations[i].animation = null;
+                registeredAnimations.splice(i, 1);
+                _coordinator.detachAnimationFromContext2d(animItem?.wrapper);
+                LogUtil.info(`${animItem._getLogTag()} destroyed with ${animItem.frameRate} fps`);
+            }
+        }
+    }
+
+    function onAnimationItemActive(animItem) {
+        if (!!animItem?.getUiContext()) {
+            LogUtil.info(`${animItem?._getLogTag()} activated with ${animItem?.getFrameRate()} fps.`);
+        } else {
+            LogUtil.warn(`${animItem?._getLogTag()} activated with ${animItem?.getFrameRate()} fps. no UiContext.`);
+        }
+
+        _getLooperFromAnimation(animItem)?.onAnimationActive(animItem);
+    }
+
+    function onAnimationItemIdle(animItem) {
+        if (!!animItem?.getUiContext()) {
+            LogUtil.info(`${animItem?._getLogTag()} deactivated with ${animItem?.getFrameRate()} fps`);
+        } else {
+            LogUtil.warn(`${animItem?._getLogTag()} deactivated with ${animItem?.getFrameRate()} fps. no UiContext.`);
+        }
+
+        _getLooperFromAnimation(animItem)?.onAnimationIdle(animItem);
+    }
+
+    function _destroyAnimationWithSameContext2d(context2d) {
+        let len = registeredAnimations?.length;
+        for (let i = len - 1; i >= 0; i--) {
+            let animation = registeredAnimations[i]?.animation;
+            if (animation?.wrapper === context2d) {
+                LogUtil.warn(`${_getLogTag()} destroy animation '${animation.name}(${animation?.animationID})' from ${animation?.source},
+          because animation using the same context2D. `);
+                registeredAnimations.splice(i, 1);
+                animation?.destroy();
+            }
+        }
+    }
+
+    function setupAnimation(animItem, element) {
+        animItem.addEventListener('destroy', onAnimationItemDestroy);
+        animItem.addEventListener('_active', onAnimationItemActive);
+        animItem.addEventListener('_idle', onAnimationItemIdle);
+        animItem.addEventListener('DOMLoaded', onAnimationItemLoaded);
+        registeredAnimations.push({ elem: element, animation: animItem });
+    }
+
+    function loadAnimation(params) {
+        LogUtil.info(`${_getLogTag()} load animation named '${params.name ? params.name : ''}'` +
+            `${params.uri ? ' from ' + params.uri : (params.path ? ' from ' + params.path : '')}` +
+            `, canvas uniqueId is: ${params.container?.canvas?.getUniqueId()}`);
+        LogUtil.version();
+        let context2d = params.wrapper || params.container;
+        if (!context2d) {
+            LogUtil.warn(`${_getLogTag()} loadAnimation failed because no container`);
+            return null;
+        }
+
+        let animItem = _coordinator.detachAnimationFromContext2d(context2d);
+        if (animItem) {
+            LogUtil.warn(`${_getLogTag()} destroy animation '${animItem.name}(${animItem.animationID})' in the context2d. from ${animItem.source}`);
+            animItem.destroy();
+        } else {
+            _destroyAnimationWithSameContext2d(context2d);
+        }
+
+        animItem = new AnimationItem();
+        if (!_coordinator.isContext2dBoundToCoordinator(context2d)) {
+            /* æ‰§è¡Œ loadAnimation æ—¶è¿˜æœªå°† context2d ç»‘å®šåˆ° coordinator ä¸Š, å³ç”¨æˆ·å°šæœªæ˜¾å¼è°ƒç”¨bindContext2dToCoordinator
+             * è¯´æ˜ç”¨æˆ·è¿˜å¤„åœ¨æ—§çš„å¤„ç†é€»è¾‘ä¸­, éœ€è¦å¸®ç”¨æˆ·åšä¸€æ¬¡è°ƒç”¨
+             * å‡ºäºå…¼å®¹æ€§è€ƒè™‘, æ­¤æ—¶éœ€ä¿æŒ preferredNoArea ä¸º false, å³é»˜è®¤ canvas æœ‰å¯è§é¢ç§¯
+             */
+            _coordinator.internalBindContext2dToCoordinator(context2d, false);
+        }
+        _coordinator.attachAnimationToContext2d(context2d, animItem);
+
+        setupAnimation(animItem, null);
+        animItem.setParams(params);
+        return animItem;
+    }
+
+    function setSpeed(val, animationName, onlyCurrentAbility) {
+        _logFunc('setSpeed', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setSpeed(val);
+            }
+        }
+    }
+
+    function setDirection(val, animationName, onlyCurrentAbility) {
+        _logFunc('setDirection', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setDirection(val);
+            }
+        }
+    }
+
+    function play(animationName, onlyCurrentAbility) {
+        _logFunc('play', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.play();
+            }
+        }
+    }
+
+    function resume(uiContext, timestamp, displaySynced) {
+        let len = registeredAnimations.length;
+
+        for (let i = 0; i < len; i += 1) {
+            if (!uiContext || registeredAnimations[i]?.animation.getUiContext() === uiContext) {
+                registeredAnimations[i]?.animation.resume(timestamp, displaySynced);
+            }
+        }
+    }
+
+    function pause(animationName, onlyCurrentAbility) {
+        _logFunc('pause', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.pause();
+            }
+        }
+    }
+
+    function goToAndStop(value, isFrame, animationName, onlyCurrentAbility) {
+        _logFunc('goToAndStop', animationName, onlyCurrentAbility, `${value},${isFrame}`);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.goToAndStop(value, isFrame);
+            }
+        }
+    }
+
+    function goToAndPlay(value, isFrame, animationName, onlyCurrentAbility) {
+        _logFunc('goToAndPlay', animationName, onlyCurrentAbility, `${value},${isFrame}`);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.goToAndPlay(value, isFrame);
+            }
+        }
+    }
+
+    function stop(animationName, onlyCurrentAbility) {
+        _logFunc('stop', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.stop();
+            }
+        }
+    }
+
+    function togglePause(animationName, onlyCurrentAbility) {
+        _logFunc('togglePause', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.togglePause();
+            }
+        }
+    }
+
+    /**
+     * è®¾ç½®packageName
+     * @param name åº”ç”¨çš„åŒ…å
+     */
+    function setPackageName(name) {
+        LogUtil.info(`${_getLogTag()} setPackageName: ${name}`);
+        _packageName = name;
+    }
+
+    /**
+     * è®¾ç½®æ‰€æœ‰åŠ¨ç”»çš„æ’­æ”¾å¸§ç‡
+     * @param frameRate å¸§ç‡
+     */
+    function setFrameRate(frameRate) {
+        LogUtil.info(`${_getLogTag()} setFrameRate: ${frameRate}`);
+        _userPlayingFrameRate = frameRate;
+
+        _getAllLooperFromAnimations()?.forEach((looper) => {
+            looper.changeFrameRateIfNeeded();
+        });
+    }
+
+    /**
+     * è·å–å½“å‰æ‰€æœ‰åŠ¨ç”»çš„æ’­æ”¾å¸§ç‡
+     * @returns å¸§ç‡
+     */
+    function getFrameRate() {
+        return _userPlayingFrameRate;
+    }
+
+    function destroy(animationName, onlyCurrentAbility) {
+        _logFunc('destroy', animationName, onlyCurrentAbility);
+        LogUtil.version();
+
+        let len = registeredAnimations.length;
+        for (let i = (len - 1); i >= 0; i -= 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                // æ‰¾åˆ°å³å°†è¦è¢«destroyçš„åŠ¨ç”»ï¼Œé”€æ¯ä¹‹ã€‚ä¼šè§¦å‘å›è°ƒï¼Œåœ¨å›è°ƒä¸­è¿›è¡ŒçŠ¶æ€æ¸…ç†
+                registeredAnimations[i]?.animation.destroy();
+            }
+        }
+        if (registeredAnimations.length === 0) {
+            bez.storedData = {};
+        }
+    }
+
+    // html only
+    function searchAnimations(animationData, standalone, renderer) {
+        if (!document) {
+            return;
+        }
+        let animElements = [].concat([].slice.call(document.getElementsByClassName('lottie')),
+            [].slice.call(document.getElementsByClassName('bodymovin')));
+        let lenAnims = animElements.length;
+        for (let i = 0; i < lenAnims; i += 1) {
+            if (renderer && !!animElements[i]) {
+                animElements[i].setAttribute('data-bm-type', renderer);
+            }
+            registerAnimation(animElements[i], animationData);
+        }
+        if (standalone && lenAnims === 0) {
+            if (!renderer) {
+                renderer = 'svg';
+            }
+            var body = document.getElementsByTagName('body')[0];
+            body.innerText = '';
+            var div = createTag('div');
+            div.style.width = '100%';
+            div.style.height = '100%';
+            div.setAttribute('data-bm-type', renderer);
+            body.appendChild(div);
+            registerAnimation(div, animationData);
+        }
+    }
+
+    function setContentMode(contentMode, animationName, onlyCurrentAbility) {
+        _logFunc('setContentMode', animationName, onlyCurrentAbility, contentMode);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setContentMode(contentMode);
+            }
+        }
+    }
+
+    function resize(width, height, animationName, onlyCurrentAbility) {
+        _logFunc('resize', animationName, onlyCurrentAbility, `${width} x ${height}`);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.resize(width, height);
+            }
+        }
+    }
+
+    function freeze(animationName, onlyCurrentAbility) {
+        _logFunc('freeze', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i].animation.pause();
+            }
+        }
+    }
+
+    function unfreeze(animationName, onlyCurrentAbility) {
+        _logFunc('unfreeze', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length;
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i].animation.play();
+            }
+        }
+    }
+
+    function setVolume(val, animationName, onlyCurrentAbility) {
+        _logFunc('setVolume', animationName, onlyCurrentAbility, val);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.setVolume(val);
+            }
+        }
+    }
+
+    function mute(animationName, onlyCurrentAbility) {
+        _logFunc('mute', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.mute();
+            }
+        }
+    }
+
+    function unmute(animationName, onlyCurrentAbility) {
+        _logFunc('unmute', animationName, onlyCurrentAbility);
+
+        let len = registeredAnimations.length
+        for (let i = 0; i < len; i += 1) {
+            if (_isNameMatched(registeredAnimations[i]?.animation, animationName) &&
+            _isAbilityMatched(registeredAnimations[i]?.animation, onlyCurrentAbility)) {
+                registeredAnimations[i]?.animation.unmute();
+            }
+        }
+    }
+
+    /**
+     * æ¸…é™¤å•ä¸ªæ–‡ä»¶ç¼“å­˜ï¼ˆæ”¯æŒåŒæ­¥/å¼‚æ­¥æ¨¡å¼ï¼‰
+     * @param {string} path - æ–‡ä»¶è·¯å¾„ï¼ˆæ”¯æŒHTTP URLæ ¼å¼ï¼‰
+     * @param {Object} container - åŒ…å«JSONæ•°æ®çš„å®¹å™¨å¯¹è±¡
+     * @param {boolean} isSync - æ˜¯å¦ä½¿ç”¨åŒæ­¥æ¨¡å¼æ“ä½œ
+     */
+    function clearSingleFileCache(path, container, isSync) {
+        // å®‰å…¨æ ¡éªŒï¼šç¡®ä¿ä¸Šä¸‹æ–‡å­˜åœ¨
+        let context = getContext();
+        if (!context) {
+            return;
+        }
+
+        // å¤„ç†HTTPèµ„æºè·¯å¾„
+        if (path.startsWith('http')) {
+            let pathSegments = path.split('/');
+            let parentDirName = pathSegments[pathSegments.length - 2]; // çˆ¶çº§ç›®å½•å
+            let originalFileName = pathSegments[pathSegments.length - 1]; // åŸå§‹æ–‡ä»¶åï¼ˆå«æ‰©å±•åï¼‰
+            let cleanFileName = originalFileName.replace(/\.(?:zip|json)$/i, ''); // æ¸…ç†åæ–‡ä»¶åï¼ˆå»é™¤æ‰©å±•åï¼‰
+
+            let lottieBaseDir = `${context.filesDir}/lottie/${parentDirName}`; // åŸºç¡€å­˜å‚¨ç›®å½•
+            let targetDirectory = `${lottieBaseDir}/${cleanFileName}`; // ç›®æ ‡ç›®å½•
+
+            // æ‰§è¡Œç›®å½•æ¸…ç†
+            rmdir(targetDirectory, isSync);
+        }
+
+        // å¤„ç†å›¾ç‰‡èµ„æº
+        if (container) {
+            try {
+                // è§£æèµ„æºä¸­çš„JSONæ•°æ®
+                let jsonString = container.getJsonData(path);
+                let jsonObj = JSON.parse(jsonString);
+
+                // æ„å»ºå›¾ç‰‡åŠ è½½ç›®å½•è·¯å¾„
+                let loadPath = `${context.filesDir}/lottie/loadImages/`;
+
+                // æ£€æŸ¥æ˜¯å¦å­˜åœ¨ç½‘ç»œèµ„æº
+                if (isExistNetworkAssets(jsonObj?.assets)) {
+                    rmdir(loadPath, isSync, jsonObj);
+                }
+            } catch (error) {
+                LogUtil.error(`JSONè§£æå¤±è´¥: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * å¼‚æ­¥æ¸…é™¤æ–‡ä»¶ç¼“å­˜
+     * @param {string} url - è¦æ¸…é™¤ç¼“å­˜çš„æ–‡ä»¶URLæˆ–æœ¬åœ°è·¯å¾„
+     * @param {Object|string} container - ç¼“å­˜å®¹å™¨å¯¹è±¡æˆ–ç›®å½•è·¯å¾„
+     */
+    function clearFileCache(url, container) {
+        clearFile(url, container, false);
+    }
+
+    /**
+     * åŒæ­¥æ¸…é™¤æ–‡ä»¶ç¼“å­˜
+     * @param {string} url - è¦æ¸…é™¤ç¼“å­˜çš„æ–‡ä»¶URLæˆ–æœ¬åœ°è·¯å¾„
+     * @param {Object|string} container - ç¼“å­˜å®¹å™¨å¯¹è±¡æˆ–ç›®å½•è·¯å¾„
+     */
+    function clearFileCacheSync(url, container) {
+        clearFile(url, container, true);
+    }
+
+    /**
+     * æ¸…ç†æ–‡ä»¶ç¼“å­˜ï¼ˆæ”¯æŒå•æ–‡ä»¶æˆ–å…¨å±€æ¸…ç†ï¼‰
+     * @param {string} [url] - å¯é€‰çš„æ–‡ä»¶URLè·¯å¾„ï¼Œå­˜åœ¨æ—¶æ¸…ç†æŒ‡å®šæ–‡ä»¶ç¼“å­˜
+     * @param {Object} container - åŒ…å«JSONæ•°æ®çš„å®¹å™¨å¯¹è±¡ï¼Œç”¨äºè§£æå…³è”èµ„æº
+     * @param {boolean} isSync - æ˜¯å¦ä½¿ç”¨åŒæ­¥æ¨¡å¼æ‰§è¡Œæ¸…ç†æ“ä½œ
+     */
+    function clearFile(url, container, isSync) {
+        // å®‰å…¨æ ¡éªŒï¼šç¡®ä¿ä¸Šä¸‹æ–‡å­˜åœ¨
+        let context = getContext();
+        if (!context) {
+            return;
+        }
+
+        if (url) {
+            // å•æ–‡ä»¶æ¸…ç†æ¨¡å¼ï¼šç²¾ç¡®æ¸…ç†æŒ‡å®šURLå¯¹åº”çš„ç¼“å­˜
+            clearSingleFileCache(url, container, isSync);
+            return;
+        }
+        let fileDir = `${context.filesDir}/lottie`; // åº”ç”¨ç§æœ‰æ–‡ä»¶ç›®å½•
+        let cacheDir = `${context.cacheDir}/lottie`; // ç³»ç»Ÿç¼“å­˜ç›®å½•
+
+        // æ‰§è¡Œæ¸…ç†æ“ä½œï¼ˆåŒæ­¥/å¼‚æ­¥æ¨¡å¼ï¼‰
+        rmdir(fileDir, isSync);
+        rmdir(cacheDir, isSync);
+    }
+
+    /**
+     * åˆ é™¤æŒ‡å®šèµ„æºæ–‡ä»¶
+     * @param {string} path - åŸºç¡€ç›®å½•è·¯å¾„
+     * @param {Object} assets - èµ„æºå¯¹è±¡ï¼ŒåŒ…å«idå’Œp(è·¯å¾„)å±æ€§
+     * @param {Array} filenames - æ–‡ä»¶åæ•°ç»„
+     * @param {boolean} isSync - æ˜¯å¦åŒæ­¥åˆ é™¤æ ‡å¿—
+     */
+    function rmAssetsDir(path, assets, filenames, isSync) {
+        // åˆ¤æ–­æ˜¯å¦ä¸ºHTTPèµ„æºï¼ˆé€šè¿‡æ£€æŸ¥è·¯å¾„æ˜¯å¦ä»¥httpå¼€å¤´ï¼‰
+        let isHttp = assets?.p?.startsWith('http');
+
+        if (isHttp) {
+            // æ„é€ ç›®æ ‡æ–‡ä»¶åï¼ˆassets.id + '.png'ï¼‰
+            const targetFilename = `${assets.id}.png`;
+            const fileIndex = filenames.indexOf(targetFilename);
+
+            // æ‰¾åˆ°åŒ¹é…æ–‡ä»¶æ—¶æ‰§è¡Œåˆ é™¤
+            if (fileIndex !== -1) {
+                if (isSync) {
+                    unlinkSync(path + filenames[fileIndex]);
+                } else {
+                    unlink(path + filenames[fileIndex]);
+                }
+            }
+        }
+    }
+
+    /**
+     * æ ¹æ®è·¯å¾„åˆ é™¤æ–‡ä»¶æˆ–ç›®å½•
+     * @param {string} path - åŸºç¡€ç›®å½•è·¯å¾„
+     * @param {string} filename - æ–‡ä»¶/ç›®å½•å
+     * @param {boolean} isSync - æ˜¯å¦åŒæ­¥æ“ä½œæ ‡å¿—
+     */
+    function rmDirByPath(path, filename, isSync) {
+        let dirPath = path + '/' + filename;
+        // åˆ¤æ–­æ˜¯å¦æ–‡ä»¶å¤¹
+        try {
+            let isDirectory = fs.statSync(dirPath).isDirectory();
+            if (isDirectory) {
+                rmdirSync(dirPath);
+            } else {
+                if (isSync) {
+                    unlinkSync(dirPath);
+                } else {
+                    unlink(dirPath);
+                }
+            }
+        } catch (err) {
+            LogUtil.error('Method rmDirByPath execute error: ' + JSON.stringify(err));
+        }
+    }
+
+    /**
+     *  åˆ é™¤ç›®å½•
+     * @param path - ç›®æ ‡æ ¹ç›®å½•è·¯å¾„
+     * @param isSync - æ˜¯å¦åŒæ­¥æ“ä½œæ ‡å¿—
+     * @param jsonObj - èµ„æºæè¿°å¯¹è±¡ï¼ˆå¯é€‰ï¼‰
+     */
+    function rmdir(path, isSync, jsonObj) {
+        let filenames = listFileSyncs(path);
+        if (jsonObj) {
+            for (let i = 0; i < jsonObj.assets.length; i++) {
+                rmAssetsDir(path, jsonObj.assets[i], filenames, isSync);
+            }
+        } else {
+            for (let i = 0; i < filenames.length; i++) {
+                rmDirByPath(path, filenames[i], isSync);
+            }
+        }
+    }
+
+    moduleOb.registerAnimation = registerAnimation;
+    moduleOb.loadAnimation = loadAnimation;
+    moduleOb.setSpeed = setSpeed;
+    moduleOb.setDirection = setDirection;
+    moduleOb.play = play;
+    moduleOb.pause = pause;
+    moduleOb.stop = stop;
+    moduleOb.togglePause = togglePause;
+    moduleOb.searchAnimations = searchAnimations;
+    moduleOb.resize = resize;
+    moduleOb.clearFileCache = clearFileCache;
+    moduleOb.clearFileCacheSync = clearFileCacheSync;
+    moduleOb.goToAndStop = goToAndStop;
+    moduleOb.goToAndPlay = goToAndPlay;
+    moduleOb.destroy = destroy;
+    moduleOb.freeze = freeze;
+    moduleOb.unfreeze = unfreeze;
+    moduleOb.setVolume = setVolume;
+    moduleOb.mute = mute;
+    moduleOb.unmute = unmute;
+    moduleOb.getRegisteredAnimations = getRegisteredAnimations;
+    moduleOb.setPackageName = setPackageName;
+    moduleOb.setContentMode = setContentMode;
+    moduleOb.setFrameRate = setFrameRate;
+    moduleOb.getFrameRate = getFrameRate;
+    moduleOb.bindContext2dToCoordinator = _coordinator.bindContext2dToCoordinator.bind(_coordinator);
+    moduleOb.unbindContext2dFromCoordinator = _coordinator.unbindContext2dFromCoordinator.bind(_coordinator);
+    moduleOb.setAttachedCanvasHasVisibleArea = _coordinator.setAttachedCanvasHasVisibleArea.bind(_coordinator);
+
+    return moduleOb;
+}());
+
+export default animationManager;
+ÔrFšº@ohos.graphics.displaySync®@ohos.animator­@ohos.file.fs°@ohos.deviceInfo¬../utils/bez°../utils/LogUtil¾../utils/helpers/html_elements±../utils/DataUtil±../utils/FileUtil¯./AnimationItemÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÃÙ_ hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.graphics.displaySync.d.tsAÃªoh-resolveÂGAÃÙS hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.animator.d.tsAÃªoh-resolveÂGAÃÙR hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.file.fs.d.tsAÃªoh-resolveÂGAÃÙU hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.deviceInfo.d.tsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\bez.jsAÃªoh-resolveÂGAÂÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsAÃªoh-resolveÂGAÂÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\html_elements.jsAÃªoh-resolveÂGAÂÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsAÃªoh-resolveÂGAÂÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\FileUtil.jsAÃªoh-resolveÂGAÂÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationItem.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCachešÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration 7‘ÔrK”¤type¥start£end¥local¶ImportDefaultSpecifierÔrL”¤type¥start£end¤nameªIdentifier©createTagÔrM•¤type¥start£end¥value£raw§Literal6¾../utils/helpers/html_elementsÙ '../utils/helpers/html_elements'J±ImportDeclaration9Ìe‘K¶ImportDefaultSpecifierÌ@ÌMLªIdentifierÌ@ÌM­AnimationItemM§LiteralÌSÌd¯./AnimationItem±'./AnimationItem'J±ImportDeclarationÌgÌ›‘K¶ImportDefaultSpecifierÌnÌyLªIdentifierÌnÌy«displaySyncM§LiteralÌÌ›º@ohos.graphics.displaySync¼'@ohos.graphics.displaySync'J±ImportDeclarationÌÌÃ‘K¶ImportDefaultSpecifierÌ¤Ì¬LªIdentifierÌ¤Ì¬¨animatorM§LiteralÌ²ÌÂ®@ohos.animator°'@ohos.animator'J±ImportDeclarationÌÅÌä‘K¶ImportDefaultSpecifierÌÌÌÎLªIdentifierÌÌÌÎ¢fsM§LiteralÌÔÌã­@ohos.file.fs¯'@ohos.file.fs'J±ImportDeclarationÌæÍ‘K¶ImportDefaultSpecifierÌíÌğLªIdentifierÌíÌğ£bezM§LiteralÌöÍ¬../utils/bez®'../utils/bez'J±ImportDeclarationÍÍ1‘ÔrN•¤type¥start£end¨imported¥local¯ImportSpecifierÍÍLªIdentifierÍÍ§LogUtilLªIdentifierÍÍ§LogUtilM§LiteralÍÍ1°../utils/LogUtil²'../utils/LogUtil'J±ImportDeclarationÍ3Í]‘K¶ImportDefaultSpecifierÍ:ÍDLªIdentifierÍ:ÍDªdeviceInfoM§LiteralÍJÍ\°@ohos.deviceInfo²'@ohos.deviceInfo'J±ImportDeclarationÍ_Í˜‘N¯ImportSpecifierÍhÍ|LªIdentifierÍhÍ|´isExistNetworkAssetsLªIdentifierÍhÍ|´isExistNetworkAssetsM§LiteralÍ„Í—±../utils/DataUtil³'../utils/DataUtil'J±ImportDeclarationÍšÍê”N¯ImportSpecifierÍ£Í­LªIdentifierÍ£Í­ªunlinkSyncLªIdentifierÍ£Í­ªunlinkSyncN¯ImportSpecifierÍ¯ÍµLªIdentifierÍ¯Íµ¦unlinkLªIdentifierÍ¯Íµ¦unlinkN¯ImportSpecifierÍ·ÍÀLªIdentifierÍ·ÍÀ©rmdirSyncLªIdentifierÍ·ÍÀ©rmdirSyncN¯ImportSpecifierÍÂÍÏLªIdentifierÍÂÍÏ­listFileSyncsLªIdentifierÍÂÍÏ­listFileSyncsM§LiteralÍ×Íê±../utils/FileUtil³'../utils/FileUtil'

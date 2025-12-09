@@ -1,0 +1,4033 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚ®import {
+  extendPrototype,
+} from '../utils/functionExtensions';
+
+import audioControllerFactory from '../utils/audio/AudioController';
+import {
+  getSubframeEnabled,
+  BMEnterFrameEvent,
+  BMCompleteEvent,
+  BMCompleteLoopEvent,
+  BMSegmentStartEvent,
+  BMDestroyEvent,
+  BMRenderFrameErrorEvent,
+  BMConfigErrorEvent,
+  createElementID,
+  getExpressionsPlugin,
+} from '../utils/common';
+import ImagePreloader from '../utils/imagePreloader';
+import BaseEvent from '../utils/BaseEvent';
+import dataManager from '../utils/DataManager';
+import markerParser from '../utils/markers/markerParser';
+import ProjectInterface from '../utils/expressions/ProjectInterface';
+import { getRenderer, getRegisteredRenderer } from '../renderers/renderersManager';
+import downloadManager from '../utils/DownloadManager';
+import {
+  readJson,
+  handleAssets,
+  createFilesDir,
+  handleZipAssets,
+  isCacheExist,
+  isHaveImg,
+  createImageFilesDir,
+  isJsonFile,
+  isCompressdFile,
+  isExistNetworkAssets
+} from '../utils/DataUtil';
+import {LogUtil} from '../utils/LogUtil'
+import deviceInfo from '@ohos.deviceInfo';
+
+const AnimationItem = function () {
+  this._cbs = [];
+  this.name = '';
+  this.path = '';
+  this.source = null;
+  this.isLoaded = false;
+  this.absoluteFrameToPlay = -1;  //absolute frame number based by 0, regardless of whether playing segments
+  this._absoluteFramePlayed = -1;
+  this.firstFrame = 0;            //the number of the started frame which is in playing segments
+  this.endFrame = 0;
+  this.offsetFrame = 0;           //the minimum number of segment frames. Note that it's not certainly firstFrame
+  this.totalFrames = 0;
+  this.frameRate = 0;
+  this.frameMult = 0;
+  this._speed = 1;
+  this._direction = 1;
+  this.playCount = 0;
+  this.animationData = {};
+  this.assets = [];
+  this.isPaused = true;
+  this.autoplay = false;
+  this.loop = true;
+  this.renderer = null;
+  this.animationID = createElementID();
+  this.assetsPath = '';
+  this.timeCompleted = 0;
+  this.segmentPos = 0;
+  this.isSubframeEnabled = getSubframeEnabled();
+  this.segments = [];
+  this._idle = true;
+  this.projectInterface = ProjectInterface();
+  this.imagePreloader = new ImagePreloader();
+  this.audioController = audioControllerFactory();
+  this.markers = [];
+  this.configAnimation = this.configAnimation.bind(this);
+  this.onSetupError = this.onSetupError.bind(this);
+  this.onSegmentComplete = this.onSegmentComplete.bind(this);
+  this.drawnFrameEvent = new BMEnterFrameEvent('drawnFrame', 0, 0, 0);
+  this.context = null;
+  this.packageName = '';
+  this.contentMode = '';
+  this.userPlayingFrameRate = 0;    // the max playing frame rate of this animation
+  this.lastTimestamp = 0;
+  this._loopCompleteTime = 20;
+  this._firstTime = 0;
+  this.isFirstLoaded = false;
+  this.isNetLoad = false;
+  this.isAutoSkip = true;
+  this._hasArea = true;
+  this._isCanvasStatusDeterminate = false;
+  this.autoFontSize = true;
+
+  /*
+   * for backward compatiblity
+   * relative frame based by offsetFrame.
+   */
+  Object.defineProperty(this, 'currentRawFrame', {
+    get() {
+      return this.absoluteFrameToPlay;
+    },
+    set(value) {
+      let nextFrame = this.getNextFrameToPlay(value);
+      this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+    }
+  });
+
+  /*
+   * for backward compatiblity
+   * relative frame based by offsetFrame. Integerized when subFrame is false.
+   */
+  Object.defineProperty(this, 'currentFrame', {
+    get() {
+      let frameToPlay = this.isSubframeEnabled ?  this.absoluteFrameToPlay: Math.floor(this.absoluteFrameToPlay);
+      // for backward compatiblity
+      return this.absoluteFrameToRelative(frameToPlay);
+    },
+    set(value) {
+      let frameToPlay = this.getNextFrameToPlay(value);
+      let absoluteFrame = this.relativeFrameToAbsolute(frameToPlay);
+      this.absoluteFrameToPlay = this.isSubframeEnabled ? absoluteFrame : Math.floor(absoluteFrame);
+    }
+  });
+
+  /*
+ * for backward compatiblity
+ * æ’­æ”¾é€Ÿç‡, å€¼ä¸º>=1çš„æ­£æ•´æ•°.
+ */
+  Object.defineProperty(this, 'playSpeed', {
+    get() {
+      return this._speed;
+    },
+    set(value) {
+      this.setSpeed(value);
+    }
+  });
+
+  /*
+ * for backward compatiblity
+ * æ’­æ”¾é€Ÿç‡, å€¼ä¸º>=1çš„æ­£æ•´æ•°.
+ */
+  Object.defineProperty(this, 'playDirection', {
+    get() {
+      return this._direction;
+    },
+    set(value) {
+      this.setDirection(value);
+    }
+  });
+
+};
+
+extendPrototype([BaseEvent], AnimationItem);
+
+AnimationItem.prototype._getLogTag = function() {
+  let abilityName = this.getUiContext()?.getHostContext()?.abilityInfo?.name;
+  return `<(${abilityName} ${this.animationID})> ${this.packageName} ${this.name} animation`;
+};
+
+AnimationItem.prototype.loadCacheData = function (uri, resultDir) {
+  let existResult = isCacheExist(uri, resultDir.route); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„èµ„æº
+  if (existResult?.isExist) {
+    let cacheData = readJson(uri, resultDir.route, this.triggerEvent.bind(this));
+    // ä¼˜å…ˆè¯»å–ç¼“å­˜
+    if (isJsonFile(uri)) {
+      if (cacheData?.assets?.length && isExistNetworkAssets(cacheData?.assets)) {
+        let newJsonData = handleAssets(cacheData);
+        this.setupAnimation(newJsonData); // åŠ è½½æœ‰å›¾ç‰‡èµ„æºçš„jsonèµ„æº
+      } else {
+        this.setupAnimation(cacheData); // åŠ è½½æ— å›¾ç‰‡èµ„æºçš„jsonèµ„æº
+      };
+    } else if (isCompressdFile(uri)) {
+      // ä¿®æ”¹uè·¯å¾„
+      let newCacheData = handleZipAssets(cacheData, resultDir.route);
+      this.setupAnimation(newCacheData);
+    };
+    this.isNetLoad = false;
+  } else {
+    // è‹¥ç¼“å­˜æ— èµ„æºï¼ŒåŠ è½½ç½‘ç»œèµ„æº
+    downloadManager.loadNetworkAnimation(uri, (jsonData, isNetLoad) => {
+      this.isNetLoad = isNetLoad;
+      this.setupAnimation(jsonData);
+    }, this.triggerEvent.bind(this), resultDir, false);
+  };
+};
+
+AnimationItem.prototype.loadAnimationData = function (jsonData, isNetwork) {
+  try {
+    if (jsonData?.assets?.length && isExistNetworkAssets(jsonData?.assets)) {
+      this.loadImage(jsonData, isNetwork);
+    } else {
+      // æ— ç½‘ç»œå›¾ç‰‡
+      this.setupAnimation(jsonData);
+    }
+  } catch (error) {
+    LogUtil.error(`${this._getLogTag()} error.message: ${JSON.stringify(error.message)}, error.stack: ${JSON.stringify(error.stack)}`);
+  }
+};
+
+AnimationItem.prototype.loadImage = function (jsonData, isNetwork) {
+  if (isNetwork) {
+    downloadManager.loadNetworkImage(jsonData).then((results) => {
+      let newJsonData = handleAssets(jsonData);
+      this.setupAnimation(newJsonData);
+    })
+      .catch((err) => {
+        // å¤„ç†ç½‘ç»œå¼‚å¸¸åŠ è½½ç¼“å­˜
+        let imgRouterFilesDir = createImageFilesDir();
+        let isImg = isHaveImg(imgRouterFilesDir); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„å›¾ç‰‡èµ„æº
+        if (isImg) {
+          let cacheImagesData = handleAssets(jsonData);
+          this.setupAnimation(cacheImagesData);
+        } else {
+          // ç¼“å­˜æ— èµ„æºï¼Œè¿”å›åŠ è½½å¼‚å¸¸
+          setTimeout(() => {
+            this.triggerEvent('error', err);
+          }, 0);
+        }
+        ;
+      });
+  } else {
+    // false ä¼˜å…ˆåŠ è½½ç¼“å­˜èµ„æº
+    let imgRouterFilesDir = createImageFilesDir();
+    let isImg = isHaveImg(imgRouterFilesDir); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„å›¾ç‰‡èµ„æº
+    if (isImg) {
+      let filesJsonData = handleAssets(jsonData);
+      this.setupAnimation(filesJsonData);
+    } else {
+      downloadManager.loadNetworkImage(jsonData).then((results) => {
+        let newJsonData = handleAssets(jsonData);
+        this.setupAnimation(newJsonData);
+      })
+        .catch((err) => {
+          // ä¸‹è½½å¤±è´¥,è¿”å›åŠ è½½å¼‚å¸¸
+          setTimeout(() => {
+            this.triggerEvent('error', err);
+          }, 0);
+        });
+    }
+    ;
+  }
+};
+
+AnimationItem.prototype.getUiContext = function () {
+  return this.wrapper?.canvas?.uiContext_;
+};
+
+AnimationItem.prototype.setParams = function (params) {
+  if (params.wrapper || params.container) {
+    this.wrapper = params.wrapper || params.container;
+  }
+  var animType = 'svg';
+  if (params.animType) {
+    animType = params.animType;
+  } else if (params.renderer) {
+    animType = params.renderer;
+  }
+  this.autoFontSize = 'autoFontSize' in params ? params.autoFontSize : true;
+  this.name = params.name ? params.name : '';
+  const RendererClass = getRenderer(animType);
+  this.renderer = new RendererClass(this, params.rendererSettings);
+  this.context = getContext();
+  let resContext = 'context' in params ? params.context : getContext();
+  let imagePath = 'imagePath' in params ? params.imagePath : '';
+  let imageAssetDelegate = 'imageAssetDelegate' in params ? params.imageAssetDelegate : null;
+  this.imagePreloader.setCacheType(animType, this.renderer.globalData.defs, resContext, imagePath);
+  this.imagePreloader.setImageAssetDelegate(imageAssetDelegate)
+  this.renderer.setProjectInterface(this.projectInterface);
+  this.animType = animType;
+  if (params.loop === ''
+    || params.loop === null
+    || params.loop === undefined
+    || params.loop === true) {
+    this.loop = true;
+  } else if (params.loop === false) {
+    this.loop = false;
+  } else {
+    this.loop = parseInt(params.loop, 10);
+  }
+  this.contentMode = 'contentMode' in params ? params.contentMode : '';
+  this.packageName = 'packageName' in params ? params.packageName : '';
+  if (params.frameRate) {
+    this.setFrameRate(params.frameRate);
+  }
+  this.autoplay = 'autoplay' in params ? params.autoplay : true;
+  this.isAutoSkip = 'autoSkip' in params ? params.autoSkip : true;
+  this.autoloadSegments =
+    Object.prototype.hasOwnProperty.call(params, 'autoloadSegments') ? params.autoloadSegments : true;
+  this.assetsPath = params.assetsPath;
+  this.initialSegment = params.initialSegment;
+  if (params.audioFactory) {
+    this.audioController.setAudioFactory(params.audioFactory);
+  }
+
+  if (params.animationData) {
+    this.source = 'data';
+    this.loadAnimationData(params.animationData, params.isNetwork);
+  } else if (params.path) {
+    this.source = params.path;
+    if (params.path.lastIndexOf('\\') !== -1) {
+      this.path = params.path.substr(0, params.path.lastIndexOf('\\') + 1);
+    } else {
+      this.path = params.path.substr(0, params.path.lastIndexOf('/') + 1);
+    }
+    this.fileName = params.path.substr(params.path.lastIndexOf('/') + 1);
+    this.fileName = this.fileName.substr(0, this.fileName.lastIndexOf('.json'));
+    try {
+      dataManager.loadAnimation(
+        this.wrapper,
+        params.path,
+        params.isNetwork,
+        this.configAnimation,
+        this.onSetupError
+      );
+    } catch (err) {
+      this.triggerEvent('error', err);
+    }
+  } else if (params.uri) {
+    this.source = params.uri;
+    this.loadNetworkResource(params.uri, params.isNetwork)
+  }
+};
+
+AnimationItem.prototype.onCanvasHasVisibleArea = function(canvasUniqueId, hasArea) {
+  LogUtil.info(`${this._getLogTag()} canvas(${canvasUniqueId}) has ${hasArea ? 'visible' : 'no'} area.`);
+  this._isCanvasStatusDeterminate = true;
+  this._visibleAreaChanged(canvasUniqueId, hasArea);
+};
+
+AnimationItem.prototype.loadNetworkResource = function (uri, isNetwork) {
+  let resultDir = createFilesDir(uri);
+  if (isNetwork) {
+    // true ä¼˜å…ˆåŠ è½½ç½‘ç»œèµ„æº
+    downloadManager.loadNetworkAnimation(uri, (jsonData, isNetLoad) => {
+      this.isNetLoad = isNetLoad;
+      this.setupAnimation(jsonData);
+    }, this.triggerEvent.bind(this), resultDir, true);
+  } else {
+    // false ä¼˜å…ˆåŠ è½½ç¼“å­˜èµ„æº
+    this.loadCacheData(uri, resultDir);
+  }
+};
+
+AnimationItem.prototype.onSetupError = function () {
+  setTimeout(() => {
+    this.trigger('data_failed');
+  }, 0);
+};
+
+AnimationItem.prototype.setupAnimation = function (data) {
+  dataManager.completeAnimation(
+    data,
+    this.configAnimation
+  );
+};
+
+// web only
+AnimationItem.prototype.setData = function (wrapper, animationData) {
+  if (animationData) {
+    if (typeof animationData !== 'object') {
+      animationData = JSON.parse(animationData);
+    }
+  }
+  var params = {
+    wrapper: wrapper,
+    animationData: animationData,
+  };
+  var wrapperAttributes = wrapper.attributes;
+
+  params.path = wrapperAttributes.getNamedItem('data-animation-path') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-animation-path').value
+    : wrapperAttributes.getNamedItem('data-bm-path') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-path').value
+      : wrapperAttributes.getNamedItem('bm-path')
+        ? wrapperAttributes.getNamedItem('bm-path').value
+        : '';
+  params.animType = wrapperAttributes.getNamedItem('data-anim-type') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-type').value
+    : wrapperAttributes.getNamedItem('data-bm-type') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-type').value
+      : wrapperAttributes.getNamedItem('bm-type') // eslint-disable-line no-nested-ternary
+        ? wrapperAttributes.getNamedItem('bm-type').value
+        : wrapperAttributes.getNamedItem('data-bm-renderer') // eslint-disable-line no-nested-ternary
+          ? wrapperAttributes.getNamedItem('data-bm-renderer').value
+          : wrapperAttributes.getNamedItem('bm-renderer')
+            ? wrapperAttributes.getNamedItem('bm-renderer').value
+            : getRegisteredRenderer() || 'canvas';
+
+  var loop = wrapperAttributes.getNamedItem('data-anim-loop') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-loop').value
+    : wrapperAttributes.getNamedItem('data-bm-loop') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-loop').value
+      : wrapperAttributes.getNamedItem('bm-loop')
+        ? wrapperAttributes.getNamedItem('bm-loop').value
+        : '';
+  if (loop === 'false') {
+    params.loop = false;
+  } else if (loop === 'true') {
+    params.loop = true;
+  } else if (loop !== '') {
+    params.loop = parseInt(loop, 10);
+  }
+  var autoplay = wrapperAttributes.getNamedItem('data-anim-autoplay') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-autoplay').value
+    : wrapperAttributes.getNamedItem('data-bm-autoplay') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-autoplay').value
+      : wrapperAttributes.getNamedItem('bm-autoplay')
+        ? wrapperAttributes.getNamedItem('bm-autoplay').value
+        : true;
+  params.autoplay = autoplay !== 'false';
+
+  params.name = wrapperAttributes.getNamedItem('data-name') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-name').value
+    : wrapperAttributes.getNamedItem('data-bm-name') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-name').value
+      : wrapperAttributes.getNamedItem('bm-name')
+        ? wrapperAttributes.getNamedItem('bm-name').value
+        : '';
+  var prerender = wrapperAttributes.getNamedItem('data-anim-prerender') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-prerender').value
+    : wrapperAttributes.getNamedItem('data-bm-prerender') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-prerender').value
+      : wrapperAttributes.getNamedItem('bm-prerender')
+        ? wrapperAttributes.getNamedItem('bm-prerender').value
+        : '';
+
+  if (prerender === 'false') {
+    params.prerender = false;
+  }
+  if (!params.path) {
+    this.trigger('destroy');
+  } else {
+    this.setParams(params);
+  }
+};
+
+AnimationItem.prototype.includeLayers = function (data) {
+  if (data.op > this.animationData.op) {
+    this.animationData.op = data.op;
+    this.totalFrames = Math.floor(data.op - this.animationData.ip);
+  }
+  var layers = this.animationData.layers;
+  var i;
+  var len = layers.length;
+  var newLayers = data.layers;
+  var j;
+  var jLen = newLayers.length;
+  for (j = 0; j < jLen; j += 1) {
+    i = 0;
+    while (i < len) {
+      if (layers[i].id === newLayers[j].id) {
+        layers[i] = newLayers[j];
+        break;
+      }
+      i += 1;
+    }
+  }
+  if (!!this.renderer) {
+    if (data.chars || data.fonts) {
+      this.renderer.globalData.fontManager.addChars(data.chars);
+      this.renderer.globalData.fontManager.addFonts(data.fonts, this.renderer.globalData.defs);
+    }
+  }
+  if (data.assets) {
+    len = data.assets.length;
+    for (i = 0; i < len; i += 1) {
+      this.animationData.assets.push(data.assets[i]);
+    }
+  }
+  this.animationData.__complete = false;
+  dataManager.completeAnimation(
+    this.animationData,
+    this.onSegmentComplete
+  );
+};
+
+AnimationItem.prototype.onSegmentComplete = function (data) {
+  this.animationData = data;
+  var expressionsPlugin = getExpressionsPlugin();
+  if (expressionsPlugin) {
+    expressionsPlugin.initExpressions(this);
+  }
+  this.loadNextSegment();
+};
+
+AnimationItem.prototype.loadNextSegment = function () {
+  var segments = this.animationData.segments;
+  if (!segments || segments.length === 0 || !this.autoloadSegments) {
+    this.trigger('data_ready');
+    this.timeCompleted = this.totalFrames;
+    return;
+  }
+  var segment = segments.shift();
+  this.timeCompleted = segment.time * this.frameRate;
+  var segmentPath = this.path + this.fileName + '_' + this.segmentPos + '.json';
+  this.segmentPos += 1;
+  dataManager.loadData(segmentPath, this.includeLayers.bind(this), function () {
+    this.trigger('data_failed');
+  }.bind(this));
+};
+
+AnimationItem.prototype.loadSegments = function () {
+  var segments = this.animationData.segments;
+  if (!segments) {
+    this.timeCompleted = this.totalFrames;
+  }
+  this.loadNextSegment();
+};
+
+AnimationItem.prototype.imagesLoaded = function () {
+  this.trigger('loaded_images');
+  this.checkLoaded();
+};
+
+AnimationItem.prototype.preloadImages = function () {
+  this.imagePreloader.setAssetsPath(this.assetsPath);
+  this.imagePreloader.setPath(this.path);
+  this.imagePreloader.loadAssets(this.animationData.assets, this.imagesLoaded.bind(this));
+};
+
+AnimationItem.prototype.configAnimation = function (animData, isNetLoad) {
+  if (isNetLoad != undefined) {
+    this.isNetLoad = isNetLoad
+  }
+  if (!this.renderer) {
+    return;
+  }
+  try {
+    this.animationData = animData;
+    this.renderer.configAnimation(animData);
+    if (!animData.assets) {
+      animData.assets = [];
+    }
+
+    this.assets = this.animationData.assets;
+    if(!this.animationData.fr || this.animationData.fr <= 0) {
+      this.frameRate = 10;
+      LogUtil.warn(`${this._getLogTag()} with 0 fr. use ${this.frameRate} instead.`);
+    } else {
+      this.frameRate = this.animationData.fr;
+    }
+    this.frameMult = this.frameRate / 1000;
+    this.renderer.searchExtraCompositions(animData.assets);
+    this.markers = markerParser(animData.markers || []);
+
+    this.trigger('config_ready', this);
+    this.preloadImages();
+    this.loadSegments();
+    this.updateFrameModifier();
+    this.waitForFontsLoaded();
+    if (this.isPaused) {
+      this.audioController.pause();
+    }
+
+    if (this.initialSegment) {
+      this.setSegment(this.initialSegment[0], this.initialSegment[1]);
+    } else {
+      this.setSegment(this.animationData.ip, this.animationData.op);
+    }
+
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in configAnimation: ${error.message} , ${error.stack}`);
+    this.triggerConfigError(error);
+  }
+};
+
+AnimationItem.prototype.waitForFontsLoaded = function () {
+  if (!this.renderer) {
+    return;
+  }
+  if (this.renderer.globalData.fontManager.isLoaded) {
+    this.checkLoaded();
+  } else {
+    setTimeout(this.waitForFontsLoaded.bind(this), 20);
+  }
+};
+
+AnimationItem.prototype.checkLoaded = function () {
+  if (!this.renderer) {
+    return;
+  }
+  if (!this.isLoaded
+    && this.renderer.globalData.fontManager.isLoaded
+    && (this.imagePreloader.loadedImages() || this.renderer.rendererType !== 'canvas')
+    && (this.imagePreloader.loadedFootages())
+  ) {
+    this.isLoaded = true;
+    var expressionsPlugin = getExpressionsPlugin();
+    if (expressionsPlugin) {
+      expressionsPlugin.initExpressions(this);
+    }
+    this.renderer.initItems();
+    setTimeout(function() {
+      this.trigger('DOMLoaded', this);
+    }.bind(this), 0);
+
+    LogUtil.info(`${this._getLogTag()} created from ${this.source ? this.source : 'data'}`);
+
+    if (this.autoplay) {
+      this.isFirstLoaded = true;
+      if (!this._isCanvasStatusDeterminate) {
+        LogUtil.warn(`${this._getLogTag()} playing with indeterminate canvas(${this.wrapper?.canvas?.getUniqueId()}) status.`);
+      }
+      this.play();
+    } else {
+      this.gotoCurrentFrame();
+    }
+  }
+};
+
+AnimationItem.prototype.setContentMode = function (contentMode) {
+  //é˜²æ­¢this.rendererä¸ºnullï¼Œå¯¼è‡´è¯»å–updateContentModeå±æ€§å¤±è´¥
+  if (!!this.renderer && contentMode) {
+    LogUtil.info(`${this._getLogTag()} setContentMode: ${contentMode}`);
+    this.renderer.updateContentMode(contentMode);
+  }
+};
+
+/*
+ * æ³¨æ„ï¼šè¿™é‡Œè™½ç„¶å«setFrameRate, ä½†æœ¬è´¨æ˜¯ä¸ºäº†è®¾ç½®"æ’­æ”¾å¸§ç‡", è€Œä¸æ˜¯åŠ¨ç”»æºå¸§ç‡. åŠ¨ç”»æºå¸§ç‡æ˜¯å›ºå®šå€¼.
+ */
+AnimationItem.prototype.setFrameRate = function (playingFrameRate) {
+  LogUtil.info(`${this._getLogTag()} setFrameRate: ${playingFrameRate}`);
+
+  this.userPlayingFrameRate = playingFrameRate;
+};
+
+/*
+ * æ³¨æ„ï¼šè¿™é‡Œè™½ç„¶å«getFrameRate, ä½†æœ¬è´¨æ˜¯ä¸ºäº†è·å–"æ’­æ”¾å¸§ç‡", è€Œä¸æ˜¯åŠ¨ç”»æºå¸§ç‡. åœ¨è·å–åŠ¨ç”»æºå¸§ç‡æ—¶ä¸å¯è°ƒç”¨æ­¤æ¥å£.
+ * æ­¤å¤„ä¿æŒä¸setFrameRateå‘½åé£æ ¼ä¸€è‡´æ˜¯ä¸ºäº†ä¿æŒå¯¹ç§°. ç”±äºsetFrameRateæ¥å£å·²ç»å¼€å‡ºå»äº†, ä¸èƒ½å†æ›´æ”¹.
+ */
+AnimationItem.prototype.getFrameRate = function () {
+  if (this.userPlayingFrameRate > 0 && this.userPlayingFrameRate <= 120) {
+    return this.userPlayingFrameRate;
+  } else {
+    return this.frameRate;
+  }
+}
+
+AnimationItem.prototype.resize = function (width, height) {
+  // Adding this validation for backwards compatibility in case an event object was being passed down
+  let _width = typeof width === 'number' ? width : undefined;
+  let _height = typeof height === 'number' ? height : undefined;
+
+  //é˜²æ­¢this.rendererä¸ºnullï¼Œå¯¼è‡´è¯»å–updateContainerSizeå±æ€§å¤±è´¥
+  if (!!this.renderer && !!this.renderer.updateContainerSize) {
+    this.renderer.updateContainerSize(_width, _height);
+  }
+};
+
+AnimationItem.prototype.setSubframe = function (flag) {
+  LogUtil.info(`${this._getLogTag()} setSubframe: ${flag}`);
+
+  this.isSubframeEnabled = !!flag;
+};
+
+AnimationItem.prototype.gotoCurrentFrame = function (skipOverdraw) {
+
+  if (this.timeCompleted !== this.totalFrames && this.absoluteFrameToPlay > this.timeCompleted) {
+    this.absoluteFrameToPlay = this.timeCompleted;
+  }
+
+  if (!skipOverdraw || this._absoluteFramePlayed !== this.absoluteFrameToPlay) {
+    if (this.renderCurrentFrame()) {
+      this._absoluteFramePlayed = this.absoluteFrameToPlay;
+      return true;
+    }
+  }
+
+  return false;
+};
+
+AnimationItem.prototype.changeColor = function (color, endColor, layer, index) {
+  if (!this.renderer) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} changeColor: ${color}-${endColor}, ${layer} layer, ${index} element`);
+
+  try {
+    this.renderer.changeColor(color, endColor, layer, index);
+    this.renderer.renderFrame(this.absoluteFrameToPlay, true);
+    this.gotoCurrentFrame(false);
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in changeColor: ${error.message}`);
+    // TODO: decide how to handle catch case
+  }
+}
+
+AnimationItem.prototype.renderCurrentFrame = function () {
+  if (this.isLoaded === false || !this.renderer) {
+    return false;
+  }
+
+  let frameToPlay = this.isSubframeEnabled ?  this.absoluteFrameToPlay: Math.floor(this.absoluteFrameToPlay);
+  try {
+    this.trigger('enterFrame');
+    this.renderer.renderFrame(frameToPlay);
+    this.trigger('drawnFrame');
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in renderCurrentFrame: ${error.message} , ${error.stack}`);
+    this.triggerRenderFrameError(error);
+    return false;
+  }
+
+  return true;
+};
+
+AnimationItem.prototype._updateIdleStatus = function () {
+  if (this.isPaused || (!this._hasArea && this.isAutoSkip)) {
+    if (!this._idle) {
+      this._idle = true;
+      this.trigger('_idle', this);
+    }
+  } else {
+    if (this._idle) {
+      this._idle = false;
+      this.trigger('_active', this);
+    }
+  }
+};
+
+AnimationItem.prototype._visibleAreaChanged = function (canvasUniqueId, isVisible) {
+  let hasArea = this._hasArea;
+  this._hasArea = isVisible;
+  if (hasArea !== this._hasArea) {
+    LogUtil.info(`${this._getLogTag()} canvas(${canvasUniqueId}) is ${isVisible ? 'moved in' : 'moved out'}`);
+    this._updateIdleStatus();
+  }
+};
+
+AnimationItem.prototype.play = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} play:  ${this.isPaused ? 'paused' : 'playing'}`);
+
+  if (this.isPaused === true) {
+    this.isPaused = false;
+    this.lastTimestamp = 0;   //æ­¤å¤„èµ‹å€¼ä¸å¯çœæ‰ï¼Œå®ƒå†³å®šäº†æ—¶é—´æ˜¯å¦æš‚åœ
+    this.trigger('_play');
+    LogUtil.info(`${this._getLogTag()} is playing`);
+    this.audioController.resume();
+    this._updateIdleStatus();
+  }
+};
+
+AnimationItem.prototype.pause = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} pause:  ${this.isPaused ? 'paused' : 'playing'}`);
+
+  if (this.isPaused === false) {
+    this.isPaused = true;
+    this.trigger('_pause');
+    LogUtil.info(`${this._getLogTag()} is paused`);
+    this._updateIdleStatus();
+    this.audioController.pause();
+  }
+};
+
+AnimationItem.prototype.togglePause = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} togglePause:  ${this.isPaused ? 'paused' : 'playing'}`);
+  if (this.isPaused === true) {
+    this.play();
+  } else {
+    this.pause();
+  }
+};
+
+AnimationItem.prototype.getNextFrameToPlay = function (frames) {
+  if(frames < 0) {
+    frames = -frames;
+  }
+
+  let nextFrame = frames;
+  if((this._direction > 0 && this.firstFrame > this.endFrame)      // é€†åºsegmentä¸”æ­£å‘æ’­æ”¾
+    || (this._direction < 0 && this.firstFrame < this.endFrame)) { // æ­£åºsegmentä¸”é€†å‘æ’­æ”¾
+    //æ”¹ä¸ºç”¨å¤§å€¼(åˆå§‹å€¼)ä½œä¸ºèµ·ç‚¹
+    nextFrame = this.totalFrames - 1 - frames;
+  }
+
+  return nextFrame;
+};
+
+AnimationItem.prototype._complete = function (name, explicitly) {
+  if (name && this.name !== name) {
+    return;
+  }
+
+  this.pause();
+  LogUtil.info(`${this._getLogTag()} completed${explicitly ? ' explicitly' :
+    ''}.  playing ${this.playCount} times`);
+  // å¦‚æœæ˜¯äººå·¥å¹²é¢„åœæ­¢, åˆ™ä¸è§¦å‘äº‹ä»¶å›è°ƒï¼Œä¿æŒä¸æ—§ç‰ˆæœ¬é€»è¾‘ç›¸åŒ
+  if (!explicitly) {
+    this.trigger('complete');
+  }
+  this.playCount = 0;
+};
+
+AnimationItem.prototype.stop = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+
+  LogUtil.info(`${this._getLogTag()} stop: ${this.isPaused ? 'paused' : 'playing'}`);
+  let nextFrame = this.getNextFrameToPlay(0);
+  this.gotoRelativeFrame(nextFrame);
+  this._complete(name, true);
+};
+
+AnimationItem.prototype.getMarkerData = function (markerName) {
+  var marker;
+  for (var i = 0; i < this.markers.length; i += 1) {
+    marker = this.markers[i];
+    if (marker.payload && marker.payload.name === markerName) {
+      return marker;
+    }
+  }
+  return null;
+};
+
+AnimationItem.prototype.goToAndStop = function (framesOrMarker, isFrame, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} goToAndStop: ${framesOrMarker} ${isFrame ? 'frame' : 'ms(or marker)'} ${name ? name : ''}`);
+
+  if (Number.isNaN(framesOrMarker)) {
+    LogUtil.info(`${this._getLogTag()} goToAndStop: frame is NaN`);
+    return;
+  }
+
+  if (isFrame) {
+    let nextFrame = this.getNextFrameToPlay(framesOrMarker);
+    this.goToFrame(nextFrame);
+  } else {
+    let numValue = Number(framesOrMarker);
+    if (isNaN(numValue)) {
+      let marker = this.getMarkerData(framesOrMarker);
+      if (marker) {
+        this.playCount = 0;
+        if (!marker.duration) {
+          let nextFrame = this.adjustSegment([marker.time, this.animationData.op]);
+          this.goToFrame(nextFrame);
+        } else {
+          let nextFrame = this.adjustSegment([marker.time, marker.time + marker.duration]);
+          this.goToFrame(nextFrame);
+        }
+      }
+    } else {
+      let nextFrame = this.getNextFrameToPlay(framesOrMarker * this.frameModifier);
+      this.goToFrame(nextFrame);
+    }
+  }
+
+  this.pause();
+};
+
+AnimationItem.prototype.goToAndPlay = function (framesOrMarker, isFrame, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} goToAndPlay: ${framesOrMarker} ${isFrame ? 'frame' :
+    'ms(or marker)'} ${name ? name : ''}`);
+
+  if (Number.isNaN(framesOrMarker)) {
+    this.goToAndStop(this.firstFrame, isFrame, name);
+  } else {
+    this.goToAndStop(framesOrMarker, isFrame, name);
+  }
+
+  this.play();
+};
+
+AnimationItem.prototype.resume = function (timeStamp, displaySynced) {
+  if (this.isPaused === true || this.isLoaded === false) {
+    this.lastTimestamp = timeStamp;
+    return;
+  } else if (!this._hasArea && this.isAutoSkip) { //canvaså®Œå…¨éšè—ä¸”ç”¨æˆ·ä¸è¦æ±‚å¼ºè¡Œç»˜åˆ¶æ—¶ï¼Œè·³è¿‡æ‰§è¡Œç»˜åˆ¶ã€‚
+    return;
+  }
+
+  if(displaySynced && this.isFirstLoaded) {
+    /*
+     * åˆšåˆšåŠ è½½å®ŒåŠ¨ç”»å,displaySyncé¦–å¸§çš„timestampè¿˜æ˜¯åŠ è½½åŠ¨ç”»ä¹‹å‰çš„vsyncæ‰€æºå¸¦çš„æ—¶é—´æˆ³ï¼Œåœ¨åŠ¨ç”»è§£ææ—¶é—´è¿‡é•¿çš„åœºæ™¯ä¸‹è¯¥timestampä¼šè¿‡æ—©ä»è€Œå¼•èµ·è·³å¸§ã€‚
+     * æ¯”å¦‚è§£æ30fpsåŠ¨ç”»ï¼Œå‡è®¾éœ€è¦210msï¼Œåˆ™æ—¶é—´æˆ³ä¼šæå‰210mså·¦å³ï¼Œå¯¼è‡´ç»˜åˆ¶é€»è¾‘è®¡ç®—åä¼šè·³è¿‡7å¸§ã€‚
+     * é€šè¿‡ç®€å•è·³è¿‡å¹¶ç›´æ¥ç»˜åˆ¶é¦–å¸§æ¥workaroundã€‚æœ€ç»ˆè¡¨ç°ä¸ºé¦–å¸§ä¼šå¤šæ˜¾ç¤º2ä¸ªå·¦å³çš„å‘¨æœŸã€‚
+     * TODO: å¦‚æœèƒ½å¤Ÿå°†è´Ÿè½½å¸è½½åˆ°å…¶å®ƒçº¿ç¨‹ï¼Œé™ä½ä¸»çº¿ç¨‹è´Ÿè½½ï¼Œåˆ™å¯å°†æ­¤é€»è¾‘ä¼˜åŒ–æ‰ï¼Œå¦åˆ™éœ€è¦ä¿ç•™ï¼Œä»¥ä¾¿ä¿è¯ä»é¦–å¸§å¼€å§‹æ’­æ”¾
+     */
+    LogUtil.info(`${this._getLogTag()} first play.`);
+    this.isFirstLoaded = false;
+    this.lastTimestamp = 0;
+    this.advanceTime(0); // æ’­æ”¾å½“å‰å¸§
+    return;
+  }
+
+  if (this.lastTimestamp === 0) {
+    LogUtil.info(`${this._getLogTag()} start for drawing.`);
+    this.advanceTime(0); // æ’­æ”¾å½“å‰å¸§
+  } else {
+    let elapsedTime = timeStamp - this.lastTimestamp; // displaySync.onframeå›è°ƒå¤„ç†ä¼šä¿è¯timeStampå•è°ƒæ€§ï¼Œä¸å—è®¾å¤‡æ—¶é—´è°ƒæ•´çš„å½±å“
+
+    this.advanceTime(elapsedTime);
+  }
+  this.lastTimestamp = timeStamp;
+}
+
+AnimationItem.prototype.advanceTime = function (elapsedTime) {
+  let nextFrame = this.absoluteFrameToRelative(this.absoluteFrameToPlay) + elapsedTime * this.frameModifier;
+  if (nextFrame >= this.totalFrames || nextFrame < 0) {
+    let frames = nextFrame;
+    if(nextFrame < 0) {
+      frames = -nextFrame + this.totalFrames;
+    }
+
+    if (!this.totalFrames || this.totalFrames <= 0) {
+      LogUtil.error(`${this._getLogTag()} Invalid animation data: totalFrames is 0 or negative, canvas uniqueId is: ${this.wrapper?.canvas?.getUniqueId()}`);
+      return;
+    }
+
+    let loop = true;
+    while (frames >= this.totalFrames && loop && this.totalFrames) {
+      frames -= this.totalFrames;
+      loop = this.checkLoop();
+    }
+
+    if(!loop) {
+      frames = this.totalFrames - 1;
+    }
+    nextFrame = this.getNextFrameToPlay(frames);
+  }
+
+  this.gotoRelativeFrame(nextFrame);
+};
+
+/*
+ * åœ¨å‰åå°åˆ‡æ¢åœºæ™¯ä¸‹ï¼Œä¼šå‡ºç°æ—¶é—´æˆ³è·³å˜çš„æƒ…å†µã€‚
+ * æ­¤æ—¶éœ€è¦è®¡ç®—å‡ºæ­£ç¡®çš„ä¸‹ä¸€å¸§ï¼Œå¹¶æ›´æ–°playCountæ¬¡æ•°
+ */
+AnimationItem.prototype.checkLoop = function () {
+  if ( this.checkSegments() !== -1 ) {
+    return true;
+  }
+
+  this.playCount += 1;
+
+  // total playing 1 times when this.loop = 0, 2 times when loop = 1, 3 times when loop = 2, and so on.
+  if (this.loop === true || this.playCount <= this.loop) {
+    this.trigger('loopComplete');
+    let currentTimestamp = Date.now();
+    if ((currentTimestamp - this._firstTime) > this._loopCompleteTime) {
+      this._firstTime = currentTimestamp;
+      LogUtil.info(`${this._getLogTag()} loopComplete name: ${this.name} from ${this.source}, canvas uniqueId is: ${this.wrapper?.canvas?.getUniqueId()}`);
+      this.renderer?.updateContainerSize(undefined, undefined, true);
+    }
+    return true;
+  } else {
+    //è¾¾åˆ°é¢„æœŸå‚æ•°, æ­£å¸¸æ’­æ”¾å®Œæˆ. åœç•™åœ¨æœ€åä¸€ä¸ªsegmentä¸Šã€‚TODO å¯è€ƒè™‘ä»ç¬¬1ä¸ªsegmenté‡æ–°å¼€å§‹ã€‚è¿™éœ€è¦ä¸ä»segmentsåºåˆ—ä¸­æ¸…é™¤segmentï¼Œå¹¶æŠŠsegmentPoså˜é‡åˆ©ç”¨èµ·æ¥ï¼Œ
+    setTimeout(() => {
+      this._complete();
+    }, 0);
+  }
+
+  return false;
+};
+
+AnimationItem.prototype.adjustSegment = function (arr) {
+  let nextFrame = -1;
+  if(arr[0] === arr[1]) {
+    // åŒºé—´ä¸ºå·¦é—­å³å¼€ï¼Œå› æ­¤ç›¸åŒå·¦å³å€¼æ„å‘³ç€æ²¡æœ‰å¯ç”¨å¸§ï¼Œç›´æ¥è¿”å›æ— æ•ˆå¸§
+    return nextFrame;
+  }
+
+  if (arr[1] < arr[0]) {
+    this.totalFrames = arr[0] - arr[1];
+    this.offsetFrame = arr[1] + 1;    // ä»å¤§åˆ°å°æ’­æ”¾æ—¶ï¼Œå°å€¼ä½œä¸ºç›®çš„å¸§éœ€è¦è¢«æ’é™¤, è€Œå¤§å€¼éœ€è¢«åŒ…å«ï¼Œæ•´ä½“åç§»1å¸§ä¿è¯"å·¦é—­å³å¼€"åŒºé—´
+  } else {
+    this.totalFrames = arr[1] - arr[0];
+    this.offsetFrame = arr[0];
+  }
+
+  this.timeCompleted = this.totalFrames;
+  this.firstFrame = arr[0];
+  this.endFrame = arr[1];
+  this.updateFrameModifier();
+
+  nextFrame = this.getNextFrameToPlay(0);
+
+  this.trigger('segmentStart');
+  return nextFrame;
+};
+
+AnimationItem.prototype.setSegment = function (init, end) {
+  LogUtil.info(`${this._getLogTag()} setSegment: ${init} ~ ${end}`);
+  let nextFrame = this.adjustSegment([init, end]);
+  this.gotoRelativeFrame(nextFrame);
+};
+
+AnimationItem.prototype.playSegments = function (arr, forceFlag) {
+  LogUtil.info(`${this._getLogTag()} playSegments: ${arr}, ${forceFlag ? 'immediate' : 'deferred'}`);
+
+  if (forceFlag) {
+    this.segments.length = 0;
+  }
+  let segmentAvailable = false;
+  if (typeof arr[0] === 'object') { // [ [x,x], [x,x], ...]
+    for (let i = 0; i < arr.length; i += 1) {
+      if (arr[i].length >= 2) {
+        this.segments.push(arr[i]);
+        segmentAvailable = true;
+      }
+    }
+  } else { // [x,x]
+    if (arr.length >= 2) {
+      this.segments.push(arr);
+      segmentAvailable = true;
+    }
+  }
+
+  if(!segmentAvailable) {
+    return;
+  }
+
+  if (forceFlag) {
+    this.playCount = 0; //replay
+    let nextFrame = this.checkSegments();
+    this.gotoRelativeFrame(nextFrame);
+  }
+
+  if (this.isPaused) {
+    this.play();
+  }
+};
+
+AnimationItem.prototype.resetSegments = function (forceFlag) {
+  LogUtil.info(`${this._getLogTag()} resetSegments: ${forceFlag ? 'immediate' : 'deferred'}`);
+
+  this.segments.length = 0;
+  this.segments.push([this.animationData.ip, this.animationData.op]);
+  if (forceFlag) {
+    this.playCount = 0;   //replay
+    let nextFrame = this.checkSegments();
+    this.gotoRelativeFrame(nextFrame);
+  }
+};
+
+AnimationItem.prototype.checkSegments = function () {
+  let nextFrame = -1;
+  while (this.segments.length) {
+    nextFrame = this.adjustSegment(this.segments.shift())
+    if(nextFrame !== -1) {
+      break;
+    }
+    // è·³è¿‡ç©ºç‰‡æ®µ
+  }
+  return nextFrame;
+};
+
+AnimationItem.prototype.destroy = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} destroy${name ? name :
+    ''}, canvas uniqueId: ${this.wrapper?.canvas?.getUniqueId()}`);
+  LogUtil.version();
+  this.stop() // stop the animation because it is dying
+  if (this.renderer) {
+    this.renderer.destroy();
+    this.renderer = null;
+  }
+  if (this.imagePreloader) {
+    this.imagePreloader.destroy();
+    this.imagePreloader = null;
+  }
+  this.trigger('destroy');
+  this._cbs = null;
+  this.onEnterFrame = null;
+  this.onLoopComplete = null;
+  this.onComplete = null;
+  this.onSegmentStart = null;
+  this.onDestroy = null;
+  this.projectInterface = null;
+};
+
+AnimationItem.prototype.relativeFrameToAbsolute = function (relativeFrame) {
+  return relativeFrame + this.offsetFrame;
+};
+
+AnimationItem.prototype.absoluteFrameToRelative = function (absoluteFrame) {
+  return absoluteFrame - this.offsetFrame;
+};
+
+AnimationItem.prototype.gotoRelativeFrame = function (nextValue) {
+  let nextFrame;
+  if (this.totalFrames === nextValue) {
+    nextFrame = nextValue;
+  } else {
+    nextFrame = nextValue % this.totalFrames;
+  }
+
+  if (nextFrame < 0) {
+    nextFrame += this.totalFrames;
+  }
+
+  this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+  this.gotoCurrentFrame(true);
+};
+
+AnimationItem.prototype.goToFrame = function (nextValue) {
+  let nextFrame = nextValue;
+  if (nextFrame < 0) {
+    nextFrame += this.totalFrames;
+  }
+
+  this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+  this.gotoCurrentFrame(true);
+};
+
+AnimationItem.prototype.setSpeed = function (val) {
+  LogUtil.info(`${this._getLogTag()} setSpeed: ${val}`);
+  if (val === 0) {
+    this.pause(); // å‚è€ƒ index.d.ts setSpeedçš„å¯¹å¤–å£°æ˜ï¼šspeed>0æ­£å‘æ’­æ”¾, speed<0åå‘æ’­æ”¾, speed=0æš‚åœæ’­æ”¾, speed=1.0/-1.0æ­£å¸¸é€Ÿåº¦æ’­æ”¾
+    return;
+  }
+
+  if (val > 0) {
+    this.setDirection(1);
+  } else {
+    this.setDirection(-1);
+  }
+
+  let speed = Math.abs(val); // å‚è€ƒ index.d.ts playSpeedçš„å¯¹å¤–å£°æ˜ï¼šæ’­æ”¾é€Ÿç‡
+  if (this._speed !== speed) {
+    this._speed = speed;
+    this.updateFrameModifier();
+  }
+};
+
+AnimationItem.prototype.setDirection = function (val) {
+  let direction = val < 0 ? -1 : 1;
+  if(this._direction !== direction) {
+    LogUtil.info(`${this._getLogTag()} setDirection: ${val}`);
+
+    this._direction = direction;
+    this.updateFrameModifier();
+  }
+};
+
+AnimationItem.prototype.toggleDirection = function () {
+  LogUtil.info(`${this._getLogTag()} toggleDirection. current is ${this._direction}`);
+  this._direction = -this._direction;
+  this.updateFrameModifier();
+};
+
+AnimationItem.prototype.setLoop = function (isLooping) {
+  this.loop = isLooping;
+};
+
+AnimationItem.prototype.setVolume = function (val, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  this.audioController.setVolume(val);
+};
+
+AnimationItem.prototype.getVolume = function () {
+  return this.audioController.getVolume();
+};
+
+AnimationItem.prototype.mute = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} mute: ${name ? name : ''}`);
+
+  this.audioController.mute();
+};
+
+AnimationItem.prototype.unmute = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} unmute: ${name ? name : ''}`);
+
+  this.audioController.unmute();
+};
+
+AnimationItem.prototype.updateFrameModifier = function () {
+  let direction = 1;
+  if (this.firstFrame > this.endFrame) {
+    direction = this._direction > 0 ? -1 : 1; //ç”±å¤§åˆ°å°æ’­æ”¾æ—¶ï¼Œæ­£å‘éœ€è¦ç”¨è´Ÿå€¼ï¼Œåå‘éœ€è¦æ­£å€¼
+  } else {
+    direction = this._direction > 0 ? 1 : -1;
+  }
+
+  let modifier = this._speed * direction;
+  this.frameModifier = this.frameMult * modifier;
+  this.audioController.setRate(modifier);
+};
+
+AnimationItem.prototype.getPath = function () {
+  return this.path;
+};
+
+AnimationItem.prototype.getAssetsPath = function (assetData) {
+  var path = '';
+  if (assetData.e) {
+    path = assetData.p;
+  } else if (this.assetsPath) {
+    var imagePath = assetData.p;
+    if (imagePath.indexOf('images/') !== -1) {
+      imagePath = imagePath.split('/')[1];
+    }
+    path = this.assetsPath + imagePath;
+  } else {
+    path = this.path;
+    path += assetData.u ? assetData.u : '';
+    path += assetData.p;
+  }
+  return path;
+};
+
+AnimationItem.prototype.getAssetData = function (id) {
+  var i = 0;
+  var len = this.assets.length;
+  while (i < len) {
+    if (id === this.assets[i].id) {
+      return this.assets[i];
+    }
+    i += 1;
+  }
+  return null;
+};
+
+AnimationItem.prototype.hide = function () {
+  LogUtil.info(`${this._getLogTag()} hide.`);
+  if (!this.renderer) {
+    return;
+  }
+  this.renderer.hide();
+};
+
+AnimationItem.prototype.show = function () {
+  LogUtil.info(`${this._getLogTag()} show.`);
+  if (!this.renderer) {
+    return;
+  }
+  this.renderer.show();
+};
+
+AnimationItem.prototype.getDuration = function (isFrame) {
+  let duration = isFrame ? this.totalFrames : this.totalFrames / this.frameRate;
+  LogUtil.info(`${this._getLogTag()} getDuration: total ${duration} ${isFrame ? 'frames' : 's'}`);
+  return duration;
+};
+
+AnimationItem.prototype.updateDocumentData = function (path, documentData, index) {
+  if (!this.renderer) {
+    return;
+  }
+  try {
+    var element = this.renderer.getElementByPath(path);
+    element.updateDocumentData(documentData, index);
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in updateDocumentData: ${error.message}`);
+    // TODO: decide how to handle catch case
+  }
+};
+
+AnimationItem.prototype.trigger = function (name, args) {
+  if (this._cbs && this._cbs[name]) {
+    switch (name) {
+      case 'enterFrame':
+        this.triggerEvent(name, new BMEnterFrameEvent(name, this.currentFrame, this.totalFrames, this.frameModifier));
+        break;
+      case 'drawnFrame':
+        this.drawnFrameEvent.currentTime = this.currentFrame;
+        this.drawnFrameEvent.totalTime = this.totalFrames;
+        this.drawnFrameEvent.direction = this.frameModifier;
+        this.triggerEvent(name, this.drawnFrameEvent);
+        break;
+      case 'loopComplete':
+        this.triggerEvent(name, new BMCompleteLoopEvent(name, this.loop, this.playCount, this.frameMult));
+        break;
+      case 'complete':
+        this.triggerEvent(name, new BMCompleteEvent(name, this.frameMult));
+        break;
+      case 'segmentStart':
+        this.triggerEvent(name, new BMSegmentStartEvent(name, this.offsetFrame, this.totalFrames));
+        break;
+      case 'destroy':
+        this.triggerEvent(name, new BMDestroyEvent(name, this));
+        break;
+      default:
+        this.triggerEvent(name, args);
+    }
+  }
+  if (name === 'enterFrame' && this.onEnterFrame) {
+    this.onEnterFrame.call(this, new BMEnterFrameEvent(name, this.currentFrame, this.totalFrames, this.frameMult));
+  }
+  if (name === 'loopComplete' && this.onLoopComplete) {
+    this.onLoopComplete.call(this, new BMCompleteLoopEvent(name, this.loop, this.playCount, this.frameMult));
+  }
+  if (name === 'complete' && this.onComplete) {
+    this.onComplete.call(this, new BMCompleteEvent(name, this.frameMult));
+  }
+  if (name === 'segmentStart' && this.onSegmentStart) {
+    this.onSegmentStart.call(this, new BMSegmentStartEvent(name, this.offsetFrame, this.totalFrames));
+  }
+  if (name === 'destroy' && this.onDestroy) {
+    this.onDestroy.call(this, new BMDestroyEvent(name, this));
+  }
+};
+
+AnimationItem.prototype.triggerRenderFrameError = function (nativeError) {
+  setTimeout(() => {
+    var error = new BMRenderFrameErrorEvent(nativeError, this.currentFrame);
+    this.triggerEvent('error', error);
+
+    if (this.onError) {
+      this.onError.call(this, error);
+    }
+    LogUtil.error(`${this._getLogTag()} triggerRenderFrameError: ${JSON.stringify(error)}`);
+  }, 0);
+};
+
+AnimationItem.prototype.triggerConfigError = function (nativeError) {
+  setTimeout(() => {
+    var error = new BMConfigErrorEvent(nativeError, this.currentFrame);
+    this.triggerEvent('error', error);
+
+    if (this.onError) {
+      this.onError.call(this, error);
+    }
+    LogUtil.error(`${this._getLogTag()} triggerConfigError: ${JSON.stringify(error)}`);
+  }, 0);
+};
+
+export default AnimationItem;
+ÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\audio\AudioController.jsÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\imagePreloader.jsÙ”D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\BaseEvent.jsÙ–D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataManager.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\markers\markerParser.jsÙ§D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ProjectInterface.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\renderers\renderersManager.jsÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DownloadManager.jsÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsÙU hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.deviceInfo.d.tsÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationItem.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚ®import {
+  extendPrototype,
+} from '../utils/functionExtensions';
+
+import audioControllerFactory from '../utils/audio/AudioController';
+import {
+  getSubframeEnabled,
+  BMEnterFrameEvent,
+  BMCompleteEvent,
+  BMCompleteLoopEvent,
+  BMSegmentStartEvent,
+  BMDestroyEvent,
+  BMRenderFrameErrorEvent,
+  BMConfigErrorEvent,
+  createElementID,
+  getExpressionsPlugin,
+} from '../utils/common';
+import ImagePreloader from '../utils/imagePreloader';
+import BaseEvent from '../utils/BaseEvent';
+import dataManager from '../utils/DataManager';
+import markerParser from '../utils/markers/markerParser';
+import ProjectInterface from '../utils/expressions/ProjectInterface';
+import { getRenderer, getRegisteredRenderer } from '../renderers/renderersManager';
+import downloadManager from '../utils/DownloadManager';
+import {
+  readJson,
+  handleAssets,
+  createFilesDir,
+  handleZipAssets,
+  isCacheExist,
+  isHaveImg,
+  createImageFilesDir,
+  isJsonFile,
+  isCompressdFile,
+  isExistNetworkAssets
+} from '../utils/DataUtil';
+import {LogUtil} from '../utils/LogUtil'
+import deviceInfo from '@ohos.deviceInfo';
+
+const AnimationItem = function () {
+  this._cbs = [];
+  this.name = '';
+  this.path = '';
+  this.source = null;
+  this.isLoaded = false;
+  this.absoluteFrameToPlay = -1;  //absolute frame number based by 0, regardless of whether playing segments
+  this._absoluteFramePlayed = -1;
+  this.firstFrame = 0;            //the number of the started frame which is in playing segments
+  this.endFrame = 0;
+  this.offsetFrame = 0;           //the minimum number of segment frames. Note that it's not certainly firstFrame
+  this.totalFrames = 0;
+  this.frameRate = 0;
+  this.frameMult = 0;
+  this._speed = 1;
+  this._direction = 1;
+  this.playCount = 0;
+  this.animationData = {};
+  this.assets = [];
+  this.isPaused = true;
+  this.autoplay = false;
+  this.loop = true;
+  this.renderer = null;
+  this.animationID = createElementID();
+  this.assetsPath = '';
+  this.timeCompleted = 0;
+  this.segmentPos = 0;
+  this.isSubframeEnabled = getSubframeEnabled();
+  this.segments = [];
+  this._idle = true;
+  this.projectInterface = ProjectInterface();
+  this.imagePreloader = new ImagePreloader();
+  this.audioController = audioControllerFactory();
+  this.markers = [];
+  this.configAnimation = this.configAnimation.bind(this);
+  this.onSetupError = this.onSetupError.bind(this);
+  this.onSegmentComplete = this.onSegmentComplete.bind(this);
+  this.drawnFrameEvent = new BMEnterFrameEvent('drawnFrame', 0, 0, 0);
+  this.context = null;
+  this.packageName = '';
+  this.contentMode = '';
+  this.userPlayingFrameRate = 0;    // the max playing frame rate of this animation
+  this.lastTimestamp = 0;
+  this._loopCompleteTime = 20;
+  this._firstTime = 0;
+  this.isFirstLoaded = false;
+  this.isNetLoad = false;
+  this.isAutoSkip = true;
+  this._hasArea = true;
+  this._isCanvasStatusDeterminate = false;
+  this.autoFontSize = true;
+
+  /*
+   * for backward compatiblity
+   * relative frame based by offsetFrame.
+   */
+  Object.defineProperty(this, 'currentRawFrame', {
+    get() {
+      return this.absoluteFrameToPlay;
+    },
+    set(value) {
+      let nextFrame = this.getNextFrameToPlay(value);
+      this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+    }
+  });
+
+  /*
+   * for backward compatiblity
+   * relative frame based by offsetFrame. Integerized when subFrame is false.
+   */
+  Object.defineProperty(this, 'currentFrame', {
+    get() {
+      let frameToPlay = this.isSubframeEnabled ?  this.absoluteFrameToPlay: Math.floor(this.absoluteFrameToPlay);
+      // for backward compatiblity
+      return this.absoluteFrameToRelative(frameToPlay);
+    },
+    set(value) {
+      let frameToPlay = this.getNextFrameToPlay(value);
+      let absoluteFrame = this.relativeFrameToAbsolute(frameToPlay);
+      this.absoluteFrameToPlay = this.isSubframeEnabled ? absoluteFrame : Math.floor(absoluteFrame);
+    }
+  });
+
+  /*
+ * for backward compatiblity
+ * æ’­æ”¾é€Ÿç‡, å€¼ä¸º>=1çš„æ­£æ•´æ•°.
+ */
+  Object.defineProperty(this, 'playSpeed', {
+    get() {
+      return this._speed;
+    },
+    set(value) {
+      this.setSpeed(value);
+    }
+  });
+
+  /*
+ * for backward compatiblity
+ * æ’­æ”¾é€Ÿç‡, å€¼ä¸º>=1çš„æ­£æ•´æ•°.
+ */
+  Object.defineProperty(this, 'playDirection', {
+    get() {
+      return this._direction;
+    },
+    set(value) {
+      this.setDirection(value);
+    }
+  });
+
+};
+
+extendPrototype([BaseEvent], AnimationItem);
+
+AnimationItem.prototype._getLogTag = function() {
+  let abilityName = this.getUiContext()?.getHostContext()?.abilityInfo?.name;
+  return `<(${abilityName} ${this.animationID})> ${this.packageName} ${this.name} animation`;
+};
+
+AnimationItem.prototype.loadCacheData = function (uri, resultDir) {
+  let existResult = isCacheExist(uri, resultDir.route); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„èµ„æº
+  if (existResult?.isExist) {
+    let cacheData = readJson(uri, resultDir.route, this.triggerEvent.bind(this));
+    // ä¼˜å…ˆè¯»å–ç¼“å­˜
+    if (isJsonFile(uri)) {
+      if (cacheData?.assets?.length && isExistNetworkAssets(cacheData?.assets)) {
+        let newJsonData = handleAssets(cacheData);
+        this.setupAnimation(newJsonData); // åŠ è½½æœ‰å›¾ç‰‡èµ„æºçš„jsonèµ„æº
+      } else {
+        this.setupAnimation(cacheData); // åŠ è½½æ— å›¾ç‰‡èµ„æºçš„jsonèµ„æº
+      };
+    } else if (isCompressdFile(uri)) {
+      // ä¿®æ”¹uè·¯å¾„
+      let newCacheData = handleZipAssets(cacheData, resultDir.route);
+      this.setupAnimation(newCacheData);
+    };
+    this.isNetLoad = false;
+  } else {
+    // è‹¥ç¼“å­˜æ— èµ„æºï¼ŒåŠ è½½ç½‘ç»œèµ„æº
+    downloadManager.loadNetworkAnimation(uri, (jsonData, isNetLoad) => {
+      this.isNetLoad = isNetLoad;
+      this.setupAnimation(jsonData);
+    }, this.triggerEvent.bind(this), resultDir, false);
+  };
+};
+
+AnimationItem.prototype.loadAnimationData = function (jsonData, isNetwork) {
+  try {
+    if (jsonData?.assets?.length && isExistNetworkAssets(jsonData?.assets)) {
+      this.loadImage(jsonData, isNetwork);
+    } else {
+      // æ— ç½‘ç»œå›¾ç‰‡
+      this.setupAnimation(jsonData);
+    }
+  } catch (error) {
+    LogUtil.error(`${this._getLogTag()} error.message: ${JSON.stringify(error.message)}, error.stack: ${JSON.stringify(error.stack)}`);
+  }
+};
+
+AnimationItem.prototype.loadImage = function (jsonData, isNetwork) {
+  if (isNetwork) {
+    downloadManager.loadNetworkImage(jsonData).then((results) => {
+      let newJsonData = handleAssets(jsonData);
+      this.setupAnimation(newJsonData);
+    })
+      .catch((err) => {
+        // å¤„ç†ç½‘ç»œå¼‚å¸¸åŠ è½½ç¼“å­˜
+        let imgRouterFilesDir = createImageFilesDir();
+        let isImg = isHaveImg(imgRouterFilesDir); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„å›¾ç‰‡èµ„æº
+        if (isImg) {
+          let cacheImagesData = handleAssets(jsonData);
+          this.setupAnimation(cacheImagesData);
+        } else {
+          // ç¼“å­˜æ— èµ„æºï¼Œè¿”å›åŠ è½½å¼‚å¸¸
+          setTimeout(() => {
+            this.triggerEvent('error', err);
+          }, 0);
+        }
+        ;
+      });
+  } else {
+    // false ä¼˜å…ˆåŠ è½½ç¼“å­˜èµ„æº
+    let imgRouterFilesDir = createImageFilesDir();
+    let isImg = isHaveImg(imgRouterFilesDir); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„å›¾ç‰‡èµ„æº
+    if (isImg) {
+      let filesJsonData = handleAssets(jsonData);
+      this.setupAnimation(filesJsonData);
+    } else {
+      downloadManager.loadNetworkImage(jsonData).then((results) => {
+        let newJsonData = handleAssets(jsonData);
+        this.setupAnimation(newJsonData);
+      })
+        .catch((err) => {
+          // ä¸‹è½½å¤±è´¥,è¿”å›åŠ è½½å¼‚å¸¸
+          setTimeout(() => {
+            this.triggerEvent('error', err);
+          }, 0);
+        });
+    }
+    ;
+  }
+};
+
+AnimationItem.prototype.getUiContext = function () {
+  return this.wrapper?.canvas?.uiContext_;
+};
+
+AnimationItem.prototype.setParams = function (params) {
+  if (params.wrapper || params.container) {
+    this.wrapper = params.wrapper || params.container;
+  }
+  var animType = 'svg';
+  if (params.animType) {
+    animType = params.animType;
+  } else if (params.renderer) {
+    animType = params.renderer;
+  }
+  this.autoFontSize = 'autoFontSize' in params ? params.autoFontSize : true;
+  this.name = params.name ? params.name : '';
+  const RendererClass = getRenderer(animType);
+  this.renderer = new RendererClass(this, params.rendererSettings);
+  this.context = getContext();
+  let resContext = 'context' in params ? params.context : getContext();
+  let imagePath = 'imagePath' in params ? params.imagePath : '';
+  let imageAssetDelegate = 'imageAssetDelegate' in params ? params.imageAssetDelegate : null;
+  this.imagePreloader.setCacheType(animType, this.renderer.globalData.defs, resContext, imagePath);
+  this.imagePreloader.setImageAssetDelegate(imageAssetDelegate)
+  this.renderer.setProjectInterface(this.projectInterface);
+  this.animType = animType;
+  if (params.loop === ''
+    || params.loop === null
+    || params.loop === undefined
+    || params.loop === true) {
+    this.loop = true;
+  } else if (params.loop === false) {
+    this.loop = false;
+  } else {
+    this.loop = parseInt(params.loop, 10);
+  }
+  this.contentMode = 'contentMode' in params ? params.contentMode : '';
+  this.packageName = 'packageName' in params ? params.packageName : '';
+  if (params.frameRate) {
+    this.setFrameRate(params.frameRate);
+  }
+  this.autoplay = 'autoplay' in params ? params.autoplay : true;
+  this.isAutoSkip = 'autoSkip' in params ? params.autoSkip : true;
+  this.autoloadSegments =
+    Object.prototype.hasOwnProperty.call(params, 'autoloadSegments') ? params.autoloadSegments : true;
+  this.assetsPath = params.assetsPath;
+  this.initialSegment = params.initialSegment;
+  if (params.audioFactory) {
+    this.audioController.setAudioFactory(params.audioFactory);
+  }
+
+  if (params.animationData) {
+    this.source = 'data';
+    this.loadAnimationData(params.animationData, params.isNetwork);
+  } else if (params.path) {
+    this.source = params.path;
+    if (params.path.lastIndexOf('\\') !== -1) {
+      this.path = params.path.substr(0, params.path.lastIndexOf('\\') + 1);
+    } else {
+      this.path = params.path.substr(0, params.path.lastIndexOf('/') + 1);
+    }
+    this.fileName = params.path.substr(params.path.lastIndexOf('/') + 1);
+    this.fileName = this.fileName.substr(0, this.fileName.lastIndexOf('.json'));
+    try {
+      dataManager.loadAnimation(
+        this.wrapper,
+        params.path,
+        params.isNetwork,
+        this.configAnimation,
+        this.onSetupError
+      );
+    } catch (err) {
+      this.triggerEvent('error', err);
+    }
+  } else if (params.uri) {
+    this.source = params.uri;
+    this.loadNetworkResource(params.uri, params.isNetwork)
+  }
+};
+
+AnimationItem.prototype.onCanvasHasVisibleArea = function(canvasUniqueId, hasArea) {
+  LogUtil.info(`${this._getLogTag()} canvas(${canvasUniqueId}) has ${hasArea ? 'visible' : 'no'} area.`);
+  this._isCanvasStatusDeterminate = true;
+  this._visibleAreaChanged(canvasUniqueId, hasArea);
+};
+
+AnimationItem.prototype.loadNetworkResource = function (uri, isNetwork) {
+  let resultDir = createFilesDir(uri);
+  if (isNetwork) {
+    // true ä¼˜å…ˆåŠ è½½ç½‘ç»œèµ„æº
+    downloadManager.loadNetworkAnimation(uri, (jsonData, isNetLoad) => {
+      this.isNetLoad = isNetLoad;
+      this.setupAnimation(jsonData);
+    }, this.triggerEvent.bind(this), resultDir, true);
+  } else {
+    // false ä¼˜å…ˆåŠ è½½ç¼“å­˜èµ„æº
+    this.loadCacheData(uri, resultDir);
+  }
+};
+
+AnimationItem.prototype.onSetupError = function () {
+  setTimeout(() => {
+    this.trigger('data_failed');
+  }, 0);
+};
+
+AnimationItem.prototype.setupAnimation = function (data) {
+  dataManager.completeAnimation(
+    data,
+    this.configAnimation
+  );
+};
+
+// web only
+AnimationItem.prototype.setData = function (wrapper, animationData) {
+  if (animationData) {
+    if (typeof animationData !== 'object') {
+      animationData = JSON.parse(animationData);
+    }
+  }
+  var params = {
+    wrapper: wrapper,
+    animationData: animationData,
+  };
+  var wrapperAttributes = wrapper.attributes;
+
+  params.path = wrapperAttributes.getNamedItem('data-animation-path') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-animation-path').value
+    : wrapperAttributes.getNamedItem('data-bm-path') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-path').value
+      : wrapperAttributes.getNamedItem('bm-path')
+        ? wrapperAttributes.getNamedItem('bm-path').value
+        : '';
+  params.animType = wrapperAttributes.getNamedItem('data-anim-type') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-type').value
+    : wrapperAttributes.getNamedItem('data-bm-type') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-type').value
+      : wrapperAttributes.getNamedItem('bm-type') // eslint-disable-line no-nested-ternary
+        ? wrapperAttributes.getNamedItem('bm-type').value
+        : wrapperAttributes.getNamedItem('data-bm-renderer') // eslint-disable-line no-nested-ternary
+          ? wrapperAttributes.getNamedItem('data-bm-renderer').value
+          : wrapperAttributes.getNamedItem('bm-renderer')
+            ? wrapperAttributes.getNamedItem('bm-renderer').value
+            : getRegisteredRenderer() || 'canvas';
+
+  var loop = wrapperAttributes.getNamedItem('data-anim-loop') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-loop').value
+    : wrapperAttributes.getNamedItem('data-bm-loop') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-loop').value
+      : wrapperAttributes.getNamedItem('bm-loop')
+        ? wrapperAttributes.getNamedItem('bm-loop').value
+        : '';
+  if (loop === 'false') {
+    params.loop = false;
+  } else if (loop === 'true') {
+    params.loop = true;
+  } else if (loop !== '') {
+    params.loop = parseInt(loop, 10);
+  }
+  var autoplay = wrapperAttributes.getNamedItem('data-anim-autoplay') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-autoplay').value
+    : wrapperAttributes.getNamedItem('data-bm-autoplay') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-autoplay').value
+      : wrapperAttributes.getNamedItem('bm-autoplay')
+        ? wrapperAttributes.getNamedItem('bm-autoplay').value
+        : true;
+  params.autoplay = autoplay !== 'false';
+
+  params.name = wrapperAttributes.getNamedItem('data-name') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-name').value
+    : wrapperAttributes.getNamedItem('data-bm-name') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-name').value
+      : wrapperAttributes.getNamedItem('bm-name')
+        ? wrapperAttributes.getNamedItem('bm-name').value
+        : '';
+  var prerender = wrapperAttributes.getNamedItem('data-anim-prerender') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-prerender').value
+    : wrapperAttributes.getNamedItem('data-bm-prerender') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-prerender').value
+      : wrapperAttributes.getNamedItem('bm-prerender')
+        ? wrapperAttributes.getNamedItem('bm-prerender').value
+        : '';
+
+  if (prerender === 'false') {
+    params.prerender = false;
+  }
+  if (!params.path) {
+    this.trigger('destroy');
+  } else {
+    this.setParams(params);
+  }
+};
+
+AnimationItem.prototype.includeLayers = function (data) {
+  if (data.op > this.animationData.op) {
+    this.animationData.op = data.op;
+    this.totalFrames = Math.floor(data.op - this.animationData.ip);
+  }
+  var layers = this.animationData.layers;
+  var i;
+  var len = layers.length;
+  var newLayers = data.layers;
+  var j;
+  var jLen = newLayers.length;
+  for (j = 0; j < jLen; j += 1) {
+    i = 0;
+    while (i < len) {
+      if (layers[i].id === newLayers[j].id) {
+        layers[i] = newLayers[j];
+        break;
+      }
+      i += 1;
+    }
+  }
+  if (!!this.renderer) {
+    if (data.chars || data.fonts) {
+      this.renderer.globalData.fontManager.addChars(data.chars);
+      this.renderer.globalData.fontManager.addFonts(data.fonts, this.renderer.globalData.defs);
+    }
+  }
+  if (data.assets) {
+    len = data.assets.length;
+    for (i = 0; i < len; i += 1) {
+      this.animationData.assets.push(data.assets[i]);
+    }
+  }
+  this.animationData.__complete = false;
+  dataManager.completeAnimation(
+    this.animationData,
+    this.onSegmentComplete
+  );
+};
+
+AnimationItem.prototype.onSegmentComplete = function (data) {
+  this.animationData = data;
+  var expressionsPlugin = getExpressionsPlugin();
+  if (expressionsPlugin) {
+    expressionsPlugin.initExpressions(this);
+  }
+  this.loadNextSegment();
+};
+
+AnimationItem.prototype.loadNextSegment = function () {
+  var segments = this.animationData.segments;
+  if (!segments || segments.length === 0 || !this.autoloadSegments) {
+    this.trigger('data_ready');
+    this.timeCompleted = this.totalFrames;
+    return;
+  }
+  var segment = segments.shift();
+  this.timeCompleted = segment.time * this.frameRate;
+  var segmentPath = this.path + this.fileName + '_' + this.segmentPos + '.json';
+  this.segmentPos += 1;
+  dataManager.loadData(segmentPath, this.includeLayers.bind(this), function () {
+    this.trigger('data_failed');
+  }.bind(this));
+};
+
+AnimationItem.prototype.loadSegments = function () {
+  var segments = this.animationData.segments;
+  if (!segments) {
+    this.timeCompleted = this.totalFrames;
+  }
+  this.loadNextSegment();
+};
+
+AnimationItem.prototype.imagesLoaded = function () {
+  this.trigger('loaded_images');
+  this.checkLoaded();
+};
+
+AnimationItem.prototype.preloadImages = function () {
+  this.imagePreloader.setAssetsPath(this.assetsPath);
+  this.imagePreloader.setPath(this.path);
+  this.imagePreloader.loadAssets(this.animationData.assets, this.imagesLoaded.bind(this));
+};
+
+AnimationItem.prototype.configAnimation = function (animData, isNetLoad) {
+  if (isNetLoad != undefined) {
+    this.isNetLoad = isNetLoad
+  }
+  if (!this.renderer) {
+    return;
+  }
+  try {
+    this.animationData = animData;
+    this.renderer.configAnimation(animData);
+    if (!animData.assets) {
+      animData.assets = [];
+    }
+
+    this.assets = this.animationData.assets;
+    if(!this.animationData.fr || this.animationData.fr <= 0) {
+      this.frameRate = 10;
+      LogUtil.warn(`${this._getLogTag()} with 0 fr. use ${this.frameRate} instead.`);
+    } else {
+      this.frameRate = this.animationData.fr;
+    }
+    this.frameMult = this.frameRate / 1000;
+    this.renderer.searchExtraCompositions(animData.assets);
+    this.markers = markerParser(animData.markers || []);
+
+    this.trigger('config_ready', this);
+    this.preloadImages();
+    this.loadSegments();
+    this.updateFrameModifier();
+    this.waitForFontsLoaded();
+    if (this.isPaused) {
+      this.audioController.pause();
+    }
+
+    if (this.initialSegment) {
+      this.setSegment(this.initialSegment[0], this.initialSegment[1]);
+    } else {
+      this.setSegment(this.animationData.ip, this.animationData.op);
+    }
+
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in configAnimation: ${error.message} , ${error.stack}`);
+    this.triggerConfigError(error);
+  }
+};
+
+AnimationItem.prototype.waitForFontsLoaded = function () {
+  if (!this.renderer) {
+    return;
+  }
+  if (this.renderer.globalData.fontManager.isLoaded) {
+    this.checkLoaded();
+  } else {
+    setTimeout(this.waitForFontsLoaded.bind(this), 20);
+  }
+};
+
+AnimationItem.prototype.checkLoaded = function () {
+  if (!this.renderer) {
+    return;
+  }
+  if (!this.isLoaded
+    && this.renderer.globalData.fontManager.isLoaded
+    && (this.imagePreloader.loadedImages() || this.renderer.rendererType !== 'canvas')
+    && (this.imagePreloader.loadedFootages())
+  ) {
+    this.isLoaded = true;
+    var expressionsPlugin = getExpressionsPlugin();
+    if (expressionsPlugin) {
+      expressionsPlugin.initExpressions(this);
+    }
+    this.renderer.initItems();
+    setTimeout(function() {
+      this.trigger('DOMLoaded', this);
+    }.bind(this), 0);
+
+    LogUtil.info(`${this._getLogTag()} created from ${this.source ? this.source : 'data'}`);
+
+    if (this.autoplay) {
+      this.isFirstLoaded = true;
+      if (!this._isCanvasStatusDeterminate) {
+        LogUtil.warn(`${this._getLogTag()} playing with indeterminate canvas(${this.wrapper?.canvas?.getUniqueId()}) status.`);
+      }
+      this.play();
+    } else {
+      this.gotoCurrentFrame();
+    }
+  }
+};
+
+AnimationItem.prototype.setContentMode = function (contentMode) {
+  //é˜²æ­¢this.rendererä¸ºnullï¼Œå¯¼è‡´è¯»å–updateContentModeå±æ€§å¤±è´¥
+  if (!!this.renderer && contentMode) {
+    LogUtil.info(`${this._getLogTag()} setContentMode: ${contentMode}`);
+    this.renderer.updateContentMode(contentMode);
+  }
+};
+
+/*
+ * æ³¨æ„ï¼šè¿™é‡Œè™½ç„¶å«setFrameRate, ä½†æœ¬è´¨æ˜¯ä¸ºäº†è®¾ç½®"æ’­æ”¾å¸§ç‡", è€Œä¸æ˜¯åŠ¨ç”»æºå¸§ç‡. åŠ¨ç”»æºå¸§ç‡æ˜¯å›ºå®šå€¼.
+ */
+AnimationItem.prototype.setFrameRate = function (playingFrameRate) {
+  LogUtil.info(`${this._getLogTag()} setFrameRate: ${playingFrameRate}`);
+
+  this.userPlayingFrameRate = playingFrameRate;
+};
+
+/*
+ * æ³¨æ„ï¼šè¿™é‡Œè™½ç„¶å«getFrameRate, ä½†æœ¬è´¨æ˜¯ä¸ºäº†è·å–"æ’­æ”¾å¸§ç‡", è€Œä¸æ˜¯åŠ¨ç”»æºå¸§ç‡. åœ¨è·å–åŠ¨ç”»æºå¸§ç‡æ—¶ä¸å¯è°ƒç”¨æ­¤æ¥å£.
+ * æ­¤å¤„ä¿æŒä¸setFrameRateå‘½åé£æ ¼ä¸€è‡´æ˜¯ä¸ºäº†ä¿æŒå¯¹ç§°. ç”±äºsetFrameRateæ¥å£å·²ç»å¼€å‡ºå»äº†, ä¸èƒ½å†æ›´æ”¹.
+ */
+AnimationItem.prototype.getFrameRate = function () {
+  if (this.userPlayingFrameRate > 0 && this.userPlayingFrameRate <= 120) {
+    return this.userPlayingFrameRate;
+  } else {
+    return this.frameRate;
+  }
+}
+
+AnimationItem.prototype.resize = function (width, height) {
+  // Adding this validation for backwards compatibility in case an event object was being passed down
+  let _width = typeof width === 'number' ? width : undefined;
+  let _height = typeof height === 'number' ? height : undefined;
+
+  //é˜²æ­¢this.rendererä¸ºnullï¼Œå¯¼è‡´è¯»å–updateContainerSizeå±æ€§å¤±è´¥
+  if (!!this.renderer && !!this.renderer.updateContainerSize) {
+    this.renderer.updateContainerSize(_width, _height);
+  }
+};
+
+AnimationItem.prototype.setSubframe = function (flag) {
+  LogUtil.info(`${this._getLogTag()} setSubframe: ${flag}`);
+
+  this.isSubframeEnabled = !!flag;
+};
+
+AnimationItem.prototype.gotoCurrentFrame = function (skipOverdraw) {
+
+  if (this.timeCompleted !== this.totalFrames && this.absoluteFrameToPlay > this.timeCompleted) {
+    this.absoluteFrameToPlay = this.timeCompleted;
+  }
+
+  if (!skipOverdraw || this._absoluteFramePlayed !== this.absoluteFrameToPlay) {
+    if (this.renderCurrentFrame()) {
+      this._absoluteFramePlayed = this.absoluteFrameToPlay;
+      return true;
+    }
+  }
+
+  return false;
+};
+
+AnimationItem.prototype.changeColor = function (color, endColor, layer, index) {
+  if (!this.renderer) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} changeColor: ${color}-${endColor}, ${layer} layer, ${index} element`);
+
+  try {
+    this.renderer.changeColor(color, endColor, layer, index);
+    this.renderer.renderFrame(this.absoluteFrameToPlay, true);
+    this.gotoCurrentFrame(false);
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in changeColor: ${error.message}`);
+    // TODO: decide how to handle catch case
+  }
+}
+
+AnimationItem.prototype.renderCurrentFrame = function () {
+  if (this.isLoaded === false || !this.renderer) {
+    return false;
+  }
+
+  let frameToPlay = this.isSubframeEnabled ?  this.absoluteFrameToPlay: Math.floor(this.absoluteFrameToPlay);
+  try {
+    this.trigger('enterFrame');
+    this.renderer.renderFrame(frameToPlay);
+    this.trigger('drawnFrame');
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in renderCurrentFrame: ${error.message} , ${error.stack}`);
+    this.triggerRenderFrameError(error);
+    return false;
+  }
+
+  return true;
+};
+
+AnimationItem.prototype._updateIdleStatus = function () {
+  if (this.isPaused || (!this._hasArea && this.isAutoSkip)) {
+    if (!this._idle) {
+      this._idle = true;
+      this.trigger('_idle', this);
+    }
+  } else {
+    if (this._idle) {
+      this._idle = false;
+      this.trigger('_active', this);
+    }
+  }
+};
+
+AnimationItem.prototype._visibleAreaChanged = function (canvasUniqueId, isVisible) {
+  let hasArea = this._hasArea;
+  this._hasArea = isVisible;
+  if (hasArea !== this._hasArea) {
+    LogUtil.info(`${this._getLogTag()} canvas(${canvasUniqueId}) is ${isVisible ? 'moved in' : 'moved out'}`);
+    this._updateIdleStatus();
+  }
+};
+
+AnimationItem.prototype.play = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} play:  ${this.isPaused ? 'paused' : 'playing'}`);
+
+  if (this.isPaused === true) {
+    this.isPaused = false;
+    this.lastTimestamp = 0;   //æ­¤å¤„èµ‹å€¼ä¸å¯çœæ‰ï¼Œå®ƒå†³å®šäº†æ—¶é—´æ˜¯å¦æš‚åœ
+    this.trigger('_play');
+    LogUtil.info(`${this._getLogTag()} is playing`);
+    this.audioController.resume();
+    this._updateIdleStatus();
+  }
+};
+
+AnimationItem.prototype.pause = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} pause:  ${this.isPaused ? 'paused' : 'playing'}`);
+
+  if (this.isPaused === false) {
+    this.isPaused = true;
+    this.trigger('_pause');
+    LogUtil.info(`${this._getLogTag()} is paused`);
+    this._updateIdleStatus();
+    this.audioController.pause();
+  }
+};
+
+AnimationItem.prototype.togglePause = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} togglePause:  ${this.isPaused ? 'paused' : 'playing'}`);
+  if (this.isPaused === true) {
+    this.play();
+  } else {
+    this.pause();
+  }
+};
+
+AnimationItem.prototype.getNextFrameToPlay = function (frames) {
+  if(frames < 0) {
+    frames = -frames;
+  }
+
+  let nextFrame = frames;
+  if((this._direction > 0 && this.firstFrame > this.endFrame)      // é€†åºsegmentä¸”æ­£å‘æ’­æ”¾
+    || (this._direction < 0 && this.firstFrame < this.endFrame)) { // æ­£åºsegmentä¸”é€†å‘æ’­æ”¾
+    //æ”¹ä¸ºç”¨å¤§å€¼(åˆå§‹å€¼)ä½œä¸ºèµ·ç‚¹
+    nextFrame = this.totalFrames - 1 - frames;
+  }
+
+  return nextFrame;
+};
+
+AnimationItem.prototype._complete = function (name, explicitly) {
+  if (name && this.name !== name) {
+    return;
+  }
+
+  this.pause();
+  LogUtil.info(`${this._getLogTag()} completed${explicitly ? ' explicitly' :
+    ''}.  playing ${this.playCount} times`);
+  // å¦‚æœæ˜¯äººå·¥å¹²é¢„åœæ­¢, åˆ™ä¸è§¦å‘äº‹ä»¶å›è°ƒï¼Œä¿æŒä¸æ—§ç‰ˆæœ¬é€»è¾‘ç›¸åŒ
+  if (!explicitly) {
+    this.trigger('complete');
+  }
+  this.playCount = 0;
+};
+
+AnimationItem.prototype.stop = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+
+  LogUtil.info(`${this._getLogTag()} stop: ${this.isPaused ? 'paused' : 'playing'}`);
+  let nextFrame = this.getNextFrameToPlay(0);
+  this.gotoRelativeFrame(nextFrame);
+  this._complete(name, true);
+};
+
+AnimationItem.prototype.getMarkerData = function (markerName) {
+  var marker;
+  for (var i = 0; i < this.markers.length; i += 1) {
+    marker = this.markers[i];
+    if (marker.payload && marker.payload.name === markerName) {
+      return marker;
+    }
+  }
+  return null;
+};
+
+AnimationItem.prototype.goToAndStop = function (framesOrMarker, isFrame, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} goToAndStop: ${framesOrMarker} ${isFrame ? 'frame' : 'ms(or marker)'} ${name ? name : ''}`);
+
+  if (Number.isNaN(framesOrMarker)) {
+    LogUtil.info(`${this._getLogTag()} goToAndStop: frame is NaN`);
+    return;
+  }
+
+  if (isFrame) {
+    let nextFrame = this.getNextFrameToPlay(framesOrMarker);
+    this.goToFrame(nextFrame);
+  } else {
+    let numValue = Number(framesOrMarker);
+    if (isNaN(numValue)) {
+      let marker = this.getMarkerData(framesOrMarker);
+      if (marker) {
+        this.playCount = 0;
+        if (!marker.duration) {
+          let nextFrame = this.adjustSegment([marker.time, this.animationData.op]);
+          this.goToFrame(nextFrame);
+        } else {
+          let nextFrame = this.adjustSegment([marker.time, marker.time + marker.duration]);
+          this.goToFrame(nextFrame);
+        }
+      }
+    } else {
+      let nextFrame = this.getNextFrameToPlay(framesOrMarker * this.frameModifier);
+      this.goToFrame(nextFrame);
+    }
+  }
+
+  this.pause();
+};
+
+AnimationItem.prototype.goToAndPlay = function (framesOrMarker, isFrame, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} goToAndPlay: ${framesOrMarker} ${isFrame ? 'frame' :
+    'ms(or marker)'} ${name ? name : ''}`);
+
+  if (Number.isNaN(framesOrMarker)) {
+    this.goToAndStop(this.firstFrame, isFrame, name);
+  } else {
+    this.goToAndStop(framesOrMarker, isFrame, name);
+  }
+
+  this.play();
+};
+
+AnimationItem.prototype.resume = function (timeStamp, displaySynced) {
+  if (this.isPaused === true || this.isLoaded === false) {
+    this.lastTimestamp = timeStamp;
+    return;
+  } else if (!this._hasArea && this.isAutoSkip) { //canvaså®Œå…¨éšè—ä¸”ç”¨æˆ·ä¸è¦æ±‚å¼ºè¡Œç»˜åˆ¶æ—¶ï¼Œè·³è¿‡æ‰§è¡Œç»˜åˆ¶ã€‚
+    return;
+  }
+
+  if(displaySynced && this.isFirstLoaded) {
+    /*
+     * åˆšåˆšåŠ è½½å®ŒåŠ¨ç”»å,displaySyncé¦–å¸§çš„timestampè¿˜æ˜¯åŠ è½½åŠ¨ç”»ä¹‹å‰çš„vsyncæ‰€æºå¸¦çš„æ—¶é—´æˆ³ï¼Œåœ¨åŠ¨ç”»è§£ææ—¶é—´è¿‡é•¿çš„åœºæ™¯ä¸‹è¯¥timestampä¼šè¿‡æ—©ä»è€Œå¼•èµ·è·³å¸§ã€‚
+     * æ¯”å¦‚è§£æ30fpsåŠ¨ç”»ï¼Œå‡è®¾éœ€è¦210msï¼Œåˆ™æ—¶é—´æˆ³ä¼šæå‰210mså·¦å³ï¼Œå¯¼è‡´ç»˜åˆ¶é€»è¾‘è®¡ç®—åä¼šè·³è¿‡7å¸§ã€‚
+     * é€šè¿‡ç®€å•è·³è¿‡å¹¶ç›´æ¥ç»˜åˆ¶é¦–å¸§æ¥workaroundã€‚æœ€ç»ˆè¡¨ç°ä¸ºé¦–å¸§ä¼šå¤šæ˜¾ç¤º2ä¸ªå·¦å³çš„å‘¨æœŸã€‚
+     * TODO: å¦‚æœèƒ½å¤Ÿå°†è´Ÿè½½å¸è½½åˆ°å…¶å®ƒçº¿ç¨‹ï¼Œé™ä½ä¸»çº¿ç¨‹è´Ÿè½½ï¼Œåˆ™å¯å°†æ­¤é€»è¾‘ä¼˜åŒ–æ‰ï¼Œå¦åˆ™éœ€è¦ä¿ç•™ï¼Œä»¥ä¾¿ä¿è¯ä»é¦–å¸§å¼€å§‹æ’­æ”¾
+     */
+    LogUtil.info(`${this._getLogTag()} first play.`);
+    this.isFirstLoaded = false;
+    this.lastTimestamp = 0;
+    this.advanceTime(0); // æ’­æ”¾å½“å‰å¸§
+    return;
+  }
+
+  if (this.lastTimestamp === 0) {
+    LogUtil.info(`${this._getLogTag()} start for drawing.`);
+    this.advanceTime(0); // æ’­æ”¾å½“å‰å¸§
+  } else {
+    let elapsedTime = timeStamp - this.lastTimestamp; // displaySync.onframeå›è°ƒå¤„ç†ä¼šä¿è¯timeStampå•è°ƒæ€§ï¼Œä¸å—è®¾å¤‡æ—¶é—´è°ƒæ•´çš„å½±å“
+
+    this.advanceTime(elapsedTime);
+  }
+  this.lastTimestamp = timeStamp;
+}
+
+AnimationItem.prototype.advanceTime = function (elapsedTime) {
+  let nextFrame = this.absoluteFrameToRelative(this.absoluteFrameToPlay) + elapsedTime * this.frameModifier;
+  if (nextFrame >= this.totalFrames || nextFrame < 0) {
+    let frames = nextFrame;
+    if(nextFrame < 0) {
+      frames = -nextFrame + this.totalFrames;
+    }
+
+    if (!this.totalFrames || this.totalFrames <= 0) {
+      LogUtil.error(`${this._getLogTag()} Invalid animation data: totalFrames is 0 or negative, canvas uniqueId is: ${this.wrapper?.canvas?.getUniqueId()}`);
+      return;
+    }
+
+    let loop = true;
+    while (frames >= this.totalFrames && loop && this.totalFrames) {
+      frames -= this.totalFrames;
+      loop = this.checkLoop();
+    }
+
+    if(!loop) {
+      frames = this.totalFrames - 1;
+    }
+    nextFrame = this.getNextFrameToPlay(frames);
+  }
+
+  this.gotoRelativeFrame(nextFrame);
+};
+
+/*
+ * åœ¨å‰åå°åˆ‡æ¢åœºæ™¯ä¸‹ï¼Œä¼šå‡ºç°æ—¶é—´æˆ³è·³å˜çš„æƒ…å†µã€‚
+ * æ­¤æ—¶éœ€è¦è®¡ç®—å‡ºæ­£ç¡®çš„ä¸‹ä¸€å¸§ï¼Œå¹¶æ›´æ–°playCountæ¬¡æ•°
+ */
+AnimationItem.prototype.checkLoop = function () {
+  if ( this.checkSegments() !== -1 ) {
+    return true;
+  }
+
+  this.playCount += 1;
+
+  // total playing 1 times when this.loop = 0, 2 times when loop = 1, 3 times when loop = 2, and so on.
+  if (this.loop === true || this.playCount <= this.loop) {
+    this.trigger('loopComplete');
+    let currentTimestamp = Date.now();
+    if ((currentTimestamp - this._firstTime) > this._loopCompleteTime) {
+      this._firstTime = currentTimestamp;
+      LogUtil.info(`${this._getLogTag()} loopComplete name: ${this.name} from ${this.source}, canvas uniqueId is: ${this.wrapper?.canvas?.getUniqueId()}`);
+      this.renderer?.updateContainerSize(undefined, undefined, true);
+    }
+    return true;
+  } else {
+    //è¾¾åˆ°é¢„æœŸå‚æ•°, æ­£å¸¸æ’­æ”¾å®Œæˆ. åœç•™åœ¨æœ€åä¸€ä¸ªsegmentä¸Šã€‚TODO å¯è€ƒè™‘ä»ç¬¬1ä¸ªsegmenté‡æ–°å¼€å§‹ã€‚è¿™éœ€è¦ä¸ä»segmentsåºåˆ—ä¸­æ¸…é™¤segmentï¼Œå¹¶æŠŠsegmentPoså˜é‡åˆ©ç”¨èµ·æ¥ï¼Œ
+    setTimeout(() => {
+      this._complete();
+    }, 0);
+  }
+
+  return false;
+};
+
+AnimationItem.prototype.adjustSegment = function (arr) {
+  let nextFrame = -1;
+  if(arr[0] === arr[1]) {
+    // åŒºé—´ä¸ºå·¦é—­å³å¼€ï¼Œå› æ­¤ç›¸åŒå·¦å³å€¼æ„å‘³ç€æ²¡æœ‰å¯ç”¨å¸§ï¼Œç›´æ¥è¿”å›æ— æ•ˆå¸§
+    return nextFrame;
+  }
+
+  if (arr[1] < arr[0]) {
+    this.totalFrames = arr[0] - arr[1];
+    this.offsetFrame = arr[1] + 1;    // ä»å¤§åˆ°å°æ’­æ”¾æ—¶ï¼Œå°å€¼ä½œä¸ºç›®çš„å¸§éœ€è¦è¢«æ’é™¤, è€Œå¤§å€¼éœ€è¢«åŒ…å«ï¼Œæ•´ä½“åç§»1å¸§ä¿è¯"å·¦é—­å³å¼€"åŒºé—´
+  } else {
+    this.totalFrames = arr[1] - arr[0];
+    this.offsetFrame = arr[0];
+  }
+
+  this.timeCompleted = this.totalFrames;
+  this.firstFrame = arr[0];
+  this.endFrame = arr[1];
+  this.updateFrameModifier();
+
+  nextFrame = this.getNextFrameToPlay(0);
+
+  this.trigger('segmentStart');
+  return nextFrame;
+};
+
+AnimationItem.prototype.setSegment = function (init, end) {
+  LogUtil.info(`${this._getLogTag()} setSegment: ${init} ~ ${end}`);
+  let nextFrame = this.adjustSegment([init, end]);
+  this.gotoRelativeFrame(nextFrame);
+};
+
+AnimationItem.prototype.playSegments = function (arr, forceFlag) {
+  LogUtil.info(`${this._getLogTag()} playSegments: ${arr}, ${forceFlag ? 'immediate' : 'deferred'}`);
+
+  if (forceFlag) {
+    this.segments.length = 0;
+  }
+  let segmentAvailable = false;
+  if (typeof arr[0] === 'object') { // [ [x,x], [x,x], ...]
+    for (let i = 0; i < arr.length; i += 1) {
+      if (arr[i].length >= 2) {
+        this.segments.push(arr[i]);
+        segmentAvailable = true;
+      }
+    }
+  } else { // [x,x]
+    if (arr.length >= 2) {
+      this.segments.push(arr);
+      segmentAvailable = true;
+    }
+  }
+
+  if(!segmentAvailable) {
+    return;
+  }
+
+  if (forceFlag) {
+    this.playCount = 0; //replay
+    let nextFrame = this.checkSegments();
+    this.gotoRelativeFrame(nextFrame);
+  }
+
+  if (this.isPaused) {
+    this.play();
+  }
+};
+
+AnimationItem.prototype.resetSegments = function (forceFlag) {
+  LogUtil.info(`${this._getLogTag()} resetSegments: ${forceFlag ? 'immediate' : 'deferred'}`);
+
+  this.segments.length = 0;
+  this.segments.push([this.animationData.ip, this.animationData.op]);
+  if (forceFlag) {
+    this.playCount = 0;   //replay
+    let nextFrame = this.checkSegments();
+    this.gotoRelativeFrame(nextFrame);
+  }
+};
+
+AnimationItem.prototype.checkSegments = function () {
+  let nextFrame = -1;
+  while (this.segments.length) {
+    nextFrame = this.adjustSegment(this.segments.shift())
+    if(nextFrame !== -1) {
+      break;
+    }
+    // è·³è¿‡ç©ºç‰‡æ®µ
+  }
+  return nextFrame;
+};
+
+AnimationItem.prototype.destroy = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} destroy${name ? name :
+    ''}, canvas uniqueId: ${this.wrapper?.canvas?.getUniqueId()}`);
+  LogUtil.version();
+  this.stop() // stop the animation because it is dying
+  if (this.renderer) {
+    this.renderer.destroy();
+    this.renderer = null;
+  }
+  if (this.imagePreloader) {
+    this.imagePreloader.destroy();
+    this.imagePreloader = null;
+  }
+  this.trigger('destroy');
+  this._cbs = null;
+  this.onEnterFrame = null;
+  this.onLoopComplete = null;
+  this.onComplete = null;
+  this.onSegmentStart = null;
+  this.onDestroy = null;
+  this.projectInterface = null;
+};
+
+AnimationItem.prototype.relativeFrameToAbsolute = function (relativeFrame) {
+  return relativeFrame + this.offsetFrame;
+};
+
+AnimationItem.prototype.absoluteFrameToRelative = function (absoluteFrame) {
+  return absoluteFrame - this.offsetFrame;
+};
+
+AnimationItem.prototype.gotoRelativeFrame = function (nextValue) {
+  let nextFrame;
+  if (this.totalFrames === nextValue) {
+    nextFrame = nextValue;
+  } else {
+    nextFrame = nextValue % this.totalFrames;
+  }
+
+  if (nextFrame < 0) {
+    nextFrame += this.totalFrames;
+  }
+
+  this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+  this.gotoCurrentFrame(true);
+};
+
+AnimationItem.prototype.goToFrame = function (nextValue) {
+  let nextFrame = nextValue;
+  if (nextFrame < 0) {
+    nextFrame += this.totalFrames;
+  }
+
+  this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+  this.gotoCurrentFrame(true);
+};
+
+AnimationItem.prototype.setSpeed = function (val) {
+  LogUtil.info(`${this._getLogTag()} setSpeed: ${val}`);
+  if (val === 0) {
+    this.pause(); // å‚è€ƒ index.d.ts setSpeedçš„å¯¹å¤–å£°æ˜ï¼šspeed>0æ­£å‘æ’­æ”¾, speed<0åå‘æ’­æ”¾, speed=0æš‚åœæ’­æ”¾, speed=1.0/-1.0æ­£å¸¸é€Ÿåº¦æ’­æ”¾
+    return;
+  }
+
+  if (val > 0) {
+    this.setDirection(1);
+  } else {
+    this.setDirection(-1);
+  }
+
+  let speed = Math.abs(val); // å‚è€ƒ index.d.ts playSpeedçš„å¯¹å¤–å£°æ˜ï¼šæ’­æ”¾é€Ÿç‡
+  if (this._speed !== speed) {
+    this._speed = speed;
+    this.updateFrameModifier();
+  }
+};
+
+AnimationItem.prototype.setDirection = function (val) {
+  let direction = val < 0 ? -1 : 1;
+  if(this._direction !== direction) {
+    LogUtil.info(`${this._getLogTag()} setDirection: ${val}`);
+
+    this._direction = direction;
+    this.updateFrameModifier();
+  }
+};
+
+AnimationItem.prototype.toggleDirection = function () {
+  LogUtil.info(`${this._getLogTag()} toggleDirection. current is ${this._direction}`);
+  this._direction = -this._direction;
+  this.updateFrameModifier();
+};
+
+AnimationItem.prototype.setLoop = function (isLooping) {
+  this.loop = isLooping;
+};
+
+AnimationItem.prototype.setVolume = function (val, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  this.audioController.setVolume(val);
+};
+
+AnimationItem.prototype.getVolume = function () {
+  return this.audioController.getVolume();
+};
+
+AnimationItem.prototype.mute = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} mute: ${name ? name : ''}`);
+
+  this.audioController.mute();
+};
+
+AnimationItem.prototype.unmute = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} unmute: ${name ? name : ''}`);
+
+  this.audioController.unmute();
+};
+
+AnimationItem.prototype.updateFrameModifier = function () {
+  let direction = 1;
+  if (this.firstFrame > this.endFrame) {
+    direction = this._direction > 0 ? -1 : 1; //ç”±å¤§åˆ°å°æ’­æ”¾æ—¶ï¼Œæ­£å‘éœ€è¦ç”¨è´Ÿå€¼ï¼Œåå‘éœ€è¦æ­£å€¼
+  } else {
+    direction = this._direction > 0 ? 1 : -1;
+  }
+
+  let modifier = this._speed * direction;
+  this.frameModifier = this.frameMult * modifier;
+  this.audioController.setRate(modifier);
+};
+
+AnimationItem.prototype.getPath = function () {
+  return this.path;
+};
+
+AnimationItem.prototype.getAssetsPath = function (assetData) {
+  var path = '';
+  if (assetData.e) {
+    path = assetData.p;
+  } else if (this.assetsPath) {
+    var imagePath = assetData.p;
+    if (imagePath.indexOf('images/') !== -1) {
+      imagePath = imagePath.split('/')[1];
+    }
+    path = this.assetsPath + imagePath;
+  } else {
+    path = this.path;
+    path += assetData.u ? assetData.u : '';
+    path += assetData.p;
+  }
+  return path;
+};
+
+AnimationItem.prototype.getAssetData = function (id) {
+  var i = 0;
+  var len = this.assets.length;
+  while (i < len) {
+    if (id === this.assets[i].id) {
+      return this.assets[i];
+    }
+    i += 1;
+  }
+  return null;
+};
+
+AnimationItem.prototype.hide = function () {
+  LogUtil.info(`${this._getLogTag()} hide.`);
+  if (!this.renderer) {
+    return;
+  }
+  this.renderer.hide();
+};
+
+AnimationItem.prototype.show = function () {
+  LogUtil.info(`${this._getLogTag()} show.`);
+  if (!this.renderer) {
+    return;
+  }
+  this.renderer.show();
+};
+
+AnimationItem.prototype.getDuration = function (isFrame) {
+  let duration = isFrame ? this.totalFrames : this.totalFrames / this.frameRate;
+  LogUtil.info(`${this._getLogTag()} getDuration: total ${duration} ${isFrame ? 'frames' : 's'}`);
+  return duration;
+};
+
+AnimationItem.prototype.updateDocumentData = function (path, documentData, index) {
+  if (!this.renderer) {
+    return;
+  }
+  try {
+    var element = this.renderer.getElementByPath(path);
+    element.updateDocumentData(documentData, index);
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in updateDocumentData: ${error.message}`);
+    // TODO: decide how to handle catch case
+  }
+};
+
+AnimationItem.prototype.trigger = function (name, args) {
+  if (this._cbs && this._cbs[name]) {
+    switch (name) {
+      case 'enterFrame':
+        this.triggerEvent(name, new BMEnterFrameEvent(name, this.currentFrame, this.totalFrames, this.frameModifier));
+        break;
+      case 'drawnFrame':
+        this.drawnFrameEvent.currentTime = this.currentFrame;
+        this.drawnFrameEvent.totalTime = this.totalFrames;
+        this.drawnFrameEvent.direction = this.frameModifier;
+        this.triggerEvent(name, this.drawnFrameEvent);
+        break;
+      case 'loopComplete':
+        this.triggerEvent(name, new BMCompleteLoopEvent(name, this.loop, this.playCount, this.frameMult));
+        break;
+      case 'complete':
+        this.triggerEvent(name, new BMCompleteEvent(name, this.frameMult));
+        break;
+      case 'segmentStart':
+        this.triggerEvent(name, new BMSegmentStartEvent(name, this.offsetFrame, this.totalFrames));
+        break;
+      case 'destroy':
+        this.triggerEvent(name, new BMDestroyEvent(name, this));
+        break;
+      default:
+        this.triggerEvent(name, args);
+    }
+  }
+  if (name === 'enterFrame' && this.onEnterFrame) {
+    this.onEnterFrame.call(this, new BMEnterFrameEvent(name, this.currentFrame, this.totalFrames, this.frameMult));
+  }
+  if (name === 'loopComplete' && this.onLoopComplete) {
+    this.onLoopComplete.call(this, new BMCompleteLoopEvent(name, this.loop, this.playCount, this.frameMult));
+  }
+  if (name === 'complete' && this.onComplete) {
+    this.onComplete.call(this, new BMCompleteEvent(name, this.frameMult));
+  }
+  if (name === 'segmentStart' && this.onSegmentStart) {
+    this.onSegmentStart.call(this, new BMSegmentStartEvent(name, this.offsetFrame, this.totalFrames));
+  }
+  if (name === 'destroy' && this.onDestroy) {
+    this.onDestroy.call(this, new BMDestroyEvent(name, this));
+  }
+};
+
+AnimationItem.prototype.triggerRenderFrameError = function (nativeError) {
+  setTimeout(() => {
+    var error = new BMRenderFrameErrorEvent(nativeError, this.currentFrame);
+    this.triggerEvent('error', error);
+
+    if (this.onError) {
+      this.onError.call(this, error);
+    }
+    LogUtil.error(`${this._getLogTag()} triggerRenderFrameError: ${JSON.stringify(error)}`);
+  }, 0);
+};
+
+AnimationItem.prototype.triggerConfigError = function (nativeError) {
+  setTimeout(() => {
+    var error = new BMConfigErrorEvent(nativeError, this.currentFrame);
+    this.triggerEvent('error', error);
+
+    if (this.onError) {
+      this.onError.call(this, error);
+    }
+    LogUtil.error(`${this._getLogTag()} triggerConfigError: ${JSON.stringify(error)}`);
+  }, 0);
+};
+
+export default AnimationItem;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ>‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Í ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍĞ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  Íİ ‘”  ÍŞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íğ ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íı ‘”  Íş ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘ÙœD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationItem.js‘Ú®import {
+  extendPrototype,
+} from '../utils/functionExtensions';
+
+import audioControllerFactory from '../utils/audio/AudioController';
+import {
+  getSubframeEnabled,
+  BMEnterFrameEvent,
+  BMCompleteEvent,
+  BMCompleteLoopEvent,
+  BMSegmentStartEvent,
+  BMDestroyEvent,
+  BMRenderFrameErrorEvent,
+  BMConfigErrorEvent,
+  createElementID,
+  getExpressionsPlugin,
+} from '../utils/common';
+import ImagePreloader from '../utils/imagePreloader';
+import BaseEvent from '../utils/BaseEvent';
+import dataManager from '../utils/DataManager';
+import markerParser from '../utils/markers/markerParser';
+import ProjectInterface from '../utils/expressions/ProjectInterface';
+import { getRenderer, getRegisteredRenderer } from '../renderers/renderersManager';
+import downloadManager from '../utils/DownloadManager';
+import {
+  readJson,
+  handleAssets,
+  createFilesDir,
+  handleZipAssets,
+  isCacheExist,
+  isHaveImg,
+  createImageFilesDir,
+  isJsonFile,
+  isCompressdFile,
+  isExistNetworkAssets
+} from '../utils/DataUtil';
+import {LogUtil} from '../utils/LogUtil'
+import deviceInfo from '@ohos.deviceInfo';
+
+const AnimationItem = function () {
+  this._cbs = [];
+  this.name = '';
+  this.path = '';
+  this.source = null;
+  this.isLoaded = false;
+  this.absoluteFrameToPlay = -1;  //absolute frame number based by 0, regardless of whether playing segments
+  this._absoluteFramePlayed = -1;
+  this.firstFrame = 0;            //the number of the started frame which is in playing segments
+  this.endFrame = 0;
+  this.offsetFrame = 0;           //the minimum number of segment frames. Note that it's not certainly firstFrame
+  this.totalFrames = 0;
+  this.frameRate = 0;
+  this.frameMult = 0;
+  this._speed = 1;
+  this._direction = 1;
+  this.playCount = 0;
+  this.animationData = {};
+  this.assets = [];
+  this.isPaused = true;
+  this.autoplay = false;
+  this.loop = true;
+  this.renderer = null;
+  this.animationID = createElementID();
+  this.assetsPath = '';
+  this.timeCompleted = 0;
+  this.segmentPos = 0;
+  this.isSubframeEnabled = getSubframeEnabled();
+  this.segments = [];
+  this._idle = true;
+  this.projectInterface = ProjectInterface();
+  this.imagePreloader = new ImagePreloader();
+  this.audioController = audioControllerFactory();
+  this.markers = [];
+  this.configAnimation = this.configAnimation.bind(this);
+  this.onSetupError = this.onSetupError.bind(this);
+  this.onSegmentComplete = this.onSegmentComplete.bind(this);
+  this.drawnFrameEvent = new BMEnterFrameEvent('drawnFrame', 0, 0, 0);
+  this.context = null;
+  this.packageName = '';
+  this.contentMode = '';
+  this.userPlayingFrameRate = 0;    // the max playing frame rate of this animation
+  this.lastTimestamp = 0;
+  this._loopCompleteTime = 20;
+  this._firstTime = 0;
+  this.isFirstLoaded = false;
+  this.isNetLoad = false;
+  this.isAutoSkip = true;
+  this._hasArea = true;
+  this._isCanvasStatusDeterminate = false;
+  this.autoFontSize = true;
+
+  /*
+   * for backward compatiblity
+   * relative frame based by offsetFrame.
+   */
+  Object.defineProperty(this, 'currentRawFrame', {
+    get() {
+      return this.absoluteFrameToPlay;
+    },
+    set(value) {
+      let nextFrame = this.getNextFrameToPlay(value);
+      this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+    }
+  });
+
+  /*
+   * for backward compatiblity
+   * relative frame based by offsetFrame. Integerized when subFrame is false.
+   */
+  Object.defineProperty(this, 'currentFrame', {
+    get() {
+      let frameToPlay = this.isSubframeEnabled ?  this.absoluteFrameToPlay: Math.floor(this.absoluteFrameToPlay);
+      // for backward compatiblity
+      return this.absoluteFrameToRelative(frameToPlay);
+    },
+    set(value) {
+      let frameToPlay = this.getNextFrameToPlay(value);
+      let absoluteFrame = this.relativeFrameToAbsolute(frameToPlay);
+      this.absoluteFrameToPlay = this.isSubframeEnabled ? absoluteFrame : Math.floor(absoluteFrame);
+    }
+  });
+
+  /*
+ * for backward compatiblity
+ * æ’­æ”¾é€Ÿç‡, å€¼ä¸º>=1çš„æ­£æ•´æ•°.
+ */
+  Object.defineProperty(this, 'playSpeed', {
+    get() {
+      return this._speed;
+    },
+    set(value) {
+      this.setSpeed(value);
+    }
+  });
+
+  /*
+ * for backward compatiblity
+ * æ’­æ”¾é€Ÿç‡, å€¼ä¸º>=1çš„æ­£æ•´æ•°.
+ */
+  Object.defineProperty(this, 'playDirection', {
+    get() {
+      return this._direction;
+    },
+    set(value) {
+      this.setDirection(value);
+    }
+  });
+
+};
+
+extendPrototype([BaseEvent], AnimationItem);
+
+AnimationItem.prototype._getLogTag = function() {
+  let abilityName = this.getUiContext()?.getHostContext()?.abilityInfo?.name;
+  return `<(${abilityName} ${this.animationID})> ${this.packageName} ${this.name} animation`;
+};
+
+AnimationItem.prototype.loadCacheData = function (uri, resultDir) {
+  let existResult = isCacheExist(uri, resultDir.route); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„èµ„æº
+  if (existResult?.isExist) {
+    let cacheData = readJson(uri, resultDir.route, this.triggerEvent.bind(this));
+    // ä¼˜å…ˆè¯»å–ç¼“å­˜
+    if (isJsonFile(uri)) {
+      if (cacheData?.assets?.length && isExistNetworkAssets(cacheData?.assets)) {
+        let newJsonData = handleAssets(cacheData);
+        this.setupAnimation(newJsonData); // åŠ è½½æœ‰å›¾ç‰‡èµ„æºçš„jsonèµ„æº
+      } else {
+        this.setupAnimation(cacheData); // åŠ è½½æ— å›¾ç‰‡èµ„æºçš„jsonèµ„æº
+      };
+    } else if (isCompressdFile(uri)) {
+      // ä¿®æ”¹uè·¯å¾„
+      let newCacheData = handleZipAssets(cacheData, resultDir.route);
+      this.setupAnimation(newCacheData);
+    };
+    this.isNetLoad = false;
+  } else {
+    // è‹¥ç¼“å­˜æ— èµ„æºï¼ŒåŠ è½½ç½‘ç»œèµ„æº
+    downloadManager.loadNetworkAnimation(uri, (jsonData, isNetLoad) => {
+      this.isNetLoad = isNetLoad;
+      this.setupAnimation(jsonData);
+    }, this.triggerEvent.bind(this), resultDir, false);
+  };
+};
+
+AnimationItem.prototype.loadAnimationData = function (jsonData, isNetwork) {
+  try {
+    if (jsonData?.assets?.length && isExistNetworkAssets(jsonData?.assets)) {
+      this.loadImage(jsonData, isNetwork);
+    } else {
+      // æ— ç½‘ç»œå›¾ç‰‡
+      this.setupAnimation(jsonData);
+    }
+  } catch (error) {
+    LogUtil.error(`${this._getLogTag()} error.message: ${JSON.stringify(error.message)}, error.stack: ${JSON.stringify(error.stack)}`);
+  }
+};
+
+AnimationItem.prototype.loadImage = function (jsonData, isNetwork) {
+  if (isNetwork) {
+    downloadManager.loadNetworkImage(jsonData).then((results) => {
+      let newJsonData = handleAssets(jsonData);
+      this.setupAnimation(newJsonData);
+    })
+      .catch((err) => {
+        // å¤„ç†ç½‘ç»œå¼‚å¸¸åŠ è½½ç¼“å­˜
+        let imgRouterFilesDir = createImageFilesDir();
+        let isImg = isHaveImg(imgRouterFilesDir); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„å›¾ç‰‡èµ„æº
+        if (isImg) {
+          let cacheImagesData = handleAssets(jsonData);
+          this.setupAnimation(cacheImagesData);
+        } else {
+          // ç¼“å­˜æ— èµ„æºï¼Œè¿”å›åŠ è½½å¼‚å¸¸
+          setTimeout(() => {
+            this.triggerEvent('error', err);
+          }, 0);
+        }
+        ;
+      });
+  } else {
+    // false ä¼˜å…ˆåŠ è½½ç¼“å­˜èµ„æº
+    let imgRouterFilesDir = createImageFilesDir();
+    let isImg = isHaveImg(imgRouterFilesDir); // æ²™ç®±ä¸­æ˜¯å¦æœ‰ä¸‹è½½çš„å›¾ç‰‡èµ„æº
+    if (isImg) {
+      let filesJsonData = handleAssets(jsonData);
+      this.setupAnimation(filesJsonData);
+    } else {
+      downloadManager.loadNetworkImage(jsonData).then((results) => {
+        let newJsonData = handleAssets(jsonData);
+        this.setupAnimation(newJsonData);
+      })
+        .catch((err) => {
+          // ä¸‹è½½å¤±è´¥,è¿”å›åŠ è½½å¼‚å¸¸
+          setTimeout(() => {
+            this.triggerEvent('error', err);
+          }, 0);
+        });
+    }
+    ;
+  }
+};
+
+AnimationItem.prototype.getUiContext = function () {
+  return this.wrapper?.canvas?.uiContext_;
+};
+
+AnimationItem.prototype.setParams = function (params) {
+  if (params.wrapper || params.container) {
+    this.wrapper = params.wrapper || params.container;
+  }
+  var animType = 'svg';
+  if (params.animType) {
+    animType = params.animType;
+  } else if (params.renderer) {
+    animType = params.renderer;
+  }
+  this.autoFontSize = 'autoFontSize' in params ? params.autoFontSize : true;
+  this.name = params.name ? params.name : '';
+  const RendererClass = getRenderer(animType);
+  this.renderer = new RendererClass(this, params.rendererSettings);
+  this.context = getContext();
+  let resContext = 'context' in params ? params.context : getContext();
+  let imagePath = 'imagePath' in params ? params.imagePath : '';
+  let imageAssetDelegate = 'imageAssetDelegate' in params ? params.imageAssetDelegate : null;
+  this.imagePreloader.setCacheType(animType, this.renderer.globalData.defs, resContext, imagePath);
+  this.imagePreloader.setImageAssetDelegate(imageAssetDelegate)
+  this.renderer.setProjectInterface(this.projectInterface);
+  this.animType = animType;
+  if (params.loop === ''
+    || params.loop === null
+    || params.loop === undefined
+    || params.loop === true) {
+    this.loop = true;
+  } else if (params.loop === false) {
+    this.loop = false;
+  } else {
+    this.loop = parseInt(params.loop, 10);
+  }
+  this.contentMode = 'contentMode' in params ? params.contentMode : '';
+  this.packageName = 'packageName' in params ? params.packageName : '';
+  if (params.frameRate) {
+    this.setFrameRate(params.frameRate);
+  }
+  this.autoplay = 'autoplay' in params ? params.autoplay : true;
+  this.isAutoSkip = 'autoSkip' in params ? params.autoSkip : true;
+  this.autoloadSegments =
+    Object.prototype.hasOwnProperty.call(params, 'autoloadSegments') ? params.autoloadSegments : true;
+  this.assetsPath = params.assetsPath;
+  this.initialSegment = params.initialSegment;
+  if (params.audioFactory) {
+    this.audioController.setAudioFactory(params.audioFactory);
+  }
+
+  if (params.animationData) {
+    this.source = 'data';
+    this.loadAnimationData(params.animationData, params.isNetwork);
+  } else if (params.path) {
+    this.source = params.path;
+    if (params.path.lastIndexOf('\\') !== -1) {
+      this.path = params.path.substr(0, params.path.lastIndexOf('\\') + 1);
+    } else {
+      this.path = params.path.substr(0, params.path.lastIndexOf('/') + 1);
+    }
+    this.fileName = params.path.substr(params.path.lastIndexOf('/') + 1);
+    this.fileName = this.fileName.substr(0, this.fileName.lastIndexOf('.json'));
+    try {
+      dataManager.loadAnimation(
+        this.wrapper,
+        params.path,
+        params.isNetwork,
+        this.configAnimation,
+        this.onSetupError
+      );
+    } catch (err) {
+      this.triggerEvent('error', err);
+    }
+  } else if (params.uri) {
+    this.source = params.uri;
+    this.loadNetworkResource(params.uri, params.isNetwork)
+  }
+};
+
+AnimationItem.prototype.onCanvasHasVisibleArea = function(canvasUniqueId, hasArea) {
+  LogUtil.info(`${this._getLogTag()} canvas(${canvasUniqueId}) has ${hasArea ? 'visible' : 'no'} area.`);
+  this._isCanvasStatusDeterminate = true;
+  this._visibleAreaChanged(canvasUniqueId, hasArea);
+};
+
+AnimationItem.prototype.loadNetworkResource = function (uri, isNetwork) {
+  let resultDir = createFilesDir(uri);
+  if (isNetwork) {
+    // true ä¼˜å…ˆåŠ è½½ç½‘ç»œèµ„æº
+    downloadManager.loadNetworkAnimation(uri, (jsonData, isNetLoad) => {
+      this.isNetLoad = isNetLoad;
+      this.setupAnimation(jsonData);
+    }, this.triggerEvent.bind(this), resultDir, true);
+  } else {
+    // false ä¼˜å…ˆåŠ è½½ç¼“å­˜èµ„æº
+    this.loadCacheData(uri, resultDir);
+  }
+};
+
+AnimationItem.prototype.onSetupError = function () {
+  setTimeout(() => {
+    this.trigger('data_failed');
+  }, 0);
+};
+
+AnimationItem.prototype.setupAnimation = function (data) {
+  dataManager.completeAnimation(
+    data,
+    this.configAnimation
+  );
+};
+
+// web only
+AnimationItem.prototype.setData = function (wrapper, animationData) {
+  if (animationData) {
+    if (typeof animationData !== 'object') {
+      animationData = JSON.parse(animationData);
+    }
+  }
+  var params = {
+    wrapper: wrapper,
+    animationData: animationData,
+  };
+  var wrapperAttributes = wrapper.attributes;
+
+  params.path = wrapperAttributes.getNamedItem('data-animation-path') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-animation-path').value
+    : wrapperAttributes.getNamedItem('data-bm-path') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-path').value
+      : wrapperAttributes.getNamedItem('bm-path')
+        ? wrapperAttributes.getNamedItem('bm-path').value
+        : '';
+  params.animType = wrapperAttributes.getNamedItem('data-anim-type') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-type').value
+    : wrapperAttributes.getNamedItem('data-bm-type') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-type').value
+      : wrapperAttributes.getNamedItem('bm-type') // eslint-disable-line no-nested-ternary
+        ? wrapperAttributes.getNamedItem('bm-type').value
+        : wrapperAttributes.getNamedItem('data-bm-renderer') // eslint-disable-line no-nested-ternary
+          ? wrapperAttributes.getNamedItem('data-bm-renderer').value
+          : wrapperAttributes.getNamedItem('bm-renderer')
+            ? wrapperAttributes.getNamedItem('bm-renderer').value
+            : getRegisteredRenderer() || 'canvas';
+
+  var loop = wrapperAttributes.getNamedItem('data-anim-loop') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-loop').value
+    : wrapperAttributes.getNamedItem('data-bm-loop') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-loop').value
+      : wrapperAttributes.getNamedItem('bm-loop')
+        ? wrapperAttributes.getNamedItem('bm-loop').value
+        : '';
+  if (loop === 'false') {
+    params.loop = false;
+  } else if (loop === 'true') {
+    params.loop = true;
+  } else if (loop !== '') {
+    params.loop = parseInt(loop, 10);
+  }
+  var autoplay = wrapperAttributes.getNamedItem('data-anim-autoplay') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-autoplay').value
+    : wrapperAttributes.getNamedItem('data-bm-autoplay') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-autoplay').value
+      : wrapperAttributes.getNamedItem('bm-autoplay')
+        ? wrapperAttributes.getNamedItem('bm-autoplay').value
+        : true;
+  params.autoplay = autoplay !== 'false';
+
+  params.name = wrapperAttributes.getNamedItem('data-name') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-name').value
+    : wrapperAttributes.getNamedItem('data-bm-name') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-name').value
+      : wrapperAttributes.getNamedItem('bm-name')
+        ? wrapperAttributes.getNamedItem('bm-name').value
+        : '';
+  var prerender = wrapperAttributes.getNamedItem('data-anim-prerender') // eslint-disable-line no-nested-ternary
+    ? wrapperAttributes.getNamedItem('data-anim-prerender').value
+    : wrapperAttributes.getNamedItem('data-bm-prerender') // eslint-disable-line no-nested-ternary
+      ? wrapperAttributes.getNamedItem('data-bm-prerender').value
+      : wrapperAttributes.getNamedItem('bm-prerender')
+        ? wrapperAttributes.getNamedItem('bm-prerender').value
+        : '';
+
+  if (prerender === 'false') {
+    params.prerender = false;
+  }
+  if (!params.path) {
+    this.trigger('destroy');
+  } else {
+    this.setParams(params);
+  }
+};
+
+AnimationItem.prototype.includeLayers = function (data) {
+  if (data.op > this.animationData.op) {
+    this.animationData.op = data.op;
+    this.totalFrames = Math.floor(data.op - this.animationData.ip);
+  }
+  var layers = this.animationData.layers;
+  var i;
+  var len = layers.length;
+  var newLayers = data.layers;
+  var j;
+  var jLen = newLayers.length;
+  for (j = 0; j < jLen; j += 1) {
+    i = 0;
+    while (i < len) {
+      if (layers[i].id === newLayers[j].id) {
+        layers[i] = newLayers[j];
+        break;
+      }
+      i += 1;
+    }
+  }
+  if (!!this.renderer) {
+    if (data.chars || data.fonts) {
+      this.renderer.globalData.fontManager.addChars(data.chars);
+      this.renderer.globalData.fontManager.addFonts(data.fonts, this.renderer.globalData.defs);
+    }
+  }
+  if (data.assets) {
+    len = data.assets.length;
+    for (i = 0; i < len; i += 1) {
+      this.animationData.assets.push(data.assets[i]);
+    }
+  }
+  this.animationData.__complete = false;
+  dataManager.completeAnimation(
+    this.animationData,
+    this.onSegmentComplete
+  );
+};
+
+AnimationItem.prototype.onSegmentComplete = function (data) {
+  this.animationData = data;
+  var expressionsPlugin = getExpressionsPlugin();
+  if (expressionsPlugin) {
+    expressionsPlugin.initExpressions(this);
+  }
+  this.loadNextSegment();
+};
+
+AnimationItem.prototype.loadNextSegment = function () {
+  var segments = this.animationData.segments;
+  if (!segments || segments.length === 0 || !this.autoloadSegments) {
+    this.trigger('data_ready');
+    this.timeCompleted = this.totalFrames;
+    return;
+  }
+  var segment = segments.shift();
+  this.timeCompleted = segment.time * this.frameRate;
+  var segmentPath = this.path + this.fileName + '_' + this.segmentPos + '.json';
+  this.segmentPos += 1;
+  dataManager.loadData(segmentPath, this.includeLayers.bind(this), function () {
+    this.trigger('data_failed');
+  }.bind(this));
+};
+
+AnimationItem.prototype.loadSegments = function () {
+  var segments = this.animationData.segments;
+  if (!segments) {
+    this.timeCompleted = this.totalFrames;
+  }
+  this.loadNextSegment();
+};
+
+AnimationItem.prototype.imagesLoaded = function () {
+  this.trigger('loaded_images');
+  this.checkLoaded();
+};
+
+AnimationItem.prototype.preloadImages = function () {
+  this.imagePreloader.setAssetsPath(this.assetsPath);
+  this.imagePreloader.setPath(this.path);
+  this.imagePreloader.loadAssets(this.animationData.assets, this.imagesLoaded.bind(this));
+};
+
+AnimationItem.prototype.configAnimation = function (animData, isNetLoad) {
+  if (isNetLoad != undefined) {
+    this.isNetLoad = isNetLoad
+  }
+  if (!this.renderer) {
+    return;
+  }
+  try {
+    this.animationData = animData;
+    this.renderer.configAnimation(animData);
+    if (!animData.assets) {
+      animData.assets = [];
+    }
+
+    this.assets = this.animationData.assets;
+    if(!this.animationData.fr || this.animationData.fr <= 0) {
+      this.frameRate = 10;
+      LogUtil.warn(`${this._getLogTag()} with 0 fr. use ${this.frameRate} instead.`);
+    } else {
+      this.frameRate = this.animationData.fr;
+    }
+    this.frameMult = this.frameRate / 1000;
+    this.renderer.searchExtraCompositions(animData.assets);
+    this.markers = markerParser(animData.markers || []);
+
+    this.trigger('config_ready', this);
+    this.preloadImages();
+    this.loadSegments();
+    this.updateFrameModifier();
+    this.waitForFontsLoaded();
+    if (this.isPaused) {
+      this.audioController.pause();
+    }
+
+    if (this.initialSegment) {
+      this.setSegment(this.initialSegment[0], this.initialSegment[1]);
+    } else {
+      this.setSegment(this.animationData.ip, this.animationData.op);
+    }
+
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in configAnimation: ${error.message} , ${error.stack}`);
+    this.triggerConfigError(error);
+  }
+};
+
+AnimationItem.prototype.waitForFontsLoaded = function () {
+  if (!this.renderer) {
+    return;
+  }
+  if (this.renderer.globalData.fontManager.isLoaded) {
+    this.checkLoaded();
+  } else {
+    setTimeout(this.waitForFontsLoaded.bind(this), 20);
+  }
+};
+
+AnimationItem.prototype.checkLoaded = function () {
+  if (!this.renderer) {
+    return;
+  }
+  if (!this.isLoaded
+    && this.renderer.globalData.fontManager.isLoaded
+    && (this.imagePreloader.loadedImages() || this.renderer.rendererType !== 'canvas')
+    && (this.imagePreloader.loadedFootages())
+  ) {
+    this.isLoaded = true;
+    var expressionsPlugin = getExpressionsPlugin();
+    if (expressionsPlugin) {
+      expressionsPlugin.initExpressions(this);
+    }
+    this.renderer.initItems();
+    setTimeout(function() {
+      this.trigger('DOMLoaded', this);
+    }.bind(this), 0);
+
+    LogUtil.info(`${this._getLogTag()} created from ${this.source ? this.source : 'data'}`);
+
+    if (this.autoplay) {
+      this.isFirstLoaded = true;
+      if (!this._isCanvasStatusDeterminate) {
+        LogUtil.warn(`${this._getLogTag()} playing with indeterminate canvas(${this.wrapper?.canvas?.getUniqueId()}) status.`);
+      }
+      this.play();
+    } else {
+      this.gotoCurrentFrame();
+    }
+  }
+};
+
+AnimationItem.prototype.setContentMode = function (contentMode) {
+  //é˜²æ­¢this.rendererä¸ºnullï¼Œå¯¼è‡´è¯»å–updateContentModeå±æ€§å¤±è´¥
+  if (!!this.renderer && contentMode) {
+    LogUtil.info(`${this._getLogTag()} setContentMode: ${contentMode}`);
+    this.renderer.updateContentMode(contentMode);
+  }
+};
+
+/*
+ * æ³¨æ„ï¼šè¿™é‡Œè™½ç„¶å«setFrameRate, ä½†æœ¬è´¨æ˜¯ä¸ºäº†è®¾ç½®"æ’­æ”¾å¸§ç‡", è€Œä¸æ˜¯åŠ¨ç”»æºå¸§ç‡. åŠ¨ç”»æºå¸§ç‡æ˜¯å›ºå®šå€¼.
+ */
+AnimationItem.prototype.setFrameRate = function (playingFrameRate) {
+  LogUtil.info(`${this._getLogTag()} setFrameRate: ${playingFrameRate}`);
+
+  this.userPlayingFrameRate = playingFrameRate;
+};
+
+/*
+ * æ³¨æ„ï¼šè¿™é‡Œè™½ç„¶å«getFrameRate, ä½†æœ¬è´¨æ˜¯ä¸ºäº†è·å–"æ’­æ”¾å¸§ç‡", è€Œä¸æ˜¯åŠ¨ç”»æºå¸§ç‡. åœ¨è·å–åŠ¨ç”»æºå¸§ç‡æ—¶ä¸å¯è°ƒç”¨æ­¤æ¥å£.
+ * æ­¤å¤„ä¿æŒä¸setFrameRateå‘½åé£æ ¼ä¸€è‡´æ˜¯ä¸ºäº†ä¿æŒå¯¹ç§°. ç”±äºsetFrameRateæ¥å£å·²ç»å¼€å‡ºå»äº†, ä¸èƒ½å†æ›´æ”¹.
+ */
+AnimationItem.prototype.getFrameRate = function () {
+  if (this.userPlayingFrameRate > 0 && this.userPlayingFrameRate <= 120) {
+    return this.userPlayingFrameRate;
+  } else {
+    return this.frameRate;
+  }
+}
+
+AnimationItem.prototype.resize = function (width, height) {
+  // Adding this validation for backwards compatibility in case an event object was being passed down
+  let _width = typeof width === 'number' ? width : undefined;
+  let _height = typeof height === 'number' ? height : undefined;
+
+  //é˜²æ­¢this.rendererä¸ºnullï¼Œå¯¼è‡´è¯»å–updateContainerSizeå±æ€§å¤±è´¥
+  if (!!this.renderer && !!this.renderer.updateContainerSize) {
+    this.renderer.updateContainerSize(_width, _height);
+  }
+};
+
+AnimationItem.prototype.setSubframe = function (flag) {
+  LogUtil.info(`${this._getLogTag()} setSubframe: ${flag}`);
+
+  this.isSubframeEnabled = !!flag;
+};
+
+AnimationItem.prototype.gotoCurrentFrame = function (skipOverdraw) {
+
+  if (this.timeCompleted !== this.totalFrames && this.absoluteFrameToPlay > this.timeCompleted) {
+    this.absoluteFrameToPlay = this.timeCompleted;
+  }
+
+  if (!skipOverdraw || this._absoluteFramePlayed !== this.absoluteFrameToPlay) {
+    if (this.renderCurrentFrame()) {
+      this._absoluteFramePlayed = this.absoluteFrameToPlay;
+      return true;
+    }
+  }
+
+  return false;
+};
+
+AnimationItem.prototype.changeColor = function (color, endColor, layer, index) {
+  if (!this.renderer) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} changeColor: ${color}-${endColor}, ${layer} layer, ${index} element`);
+
+  try {
+    this.renderer.changeColor(color, endColor, layer, index);
+    this.renderer.renderFrame(this.absoluteFrameToPlay, true);
+    this.gotoCurrentFrame(false);
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in changeColor: ${error.message}`);
+    // TODO: decide how to handle catch case
+  }
+}
+
+AnimationItem.prototype.renderCurrentFrame = function () {
+  if (this.isLoaded === false || !this.renderer) {
+    return false;
+  }
+
+  let frameToPlay = this.isSubframeEnabled ?  this.absoluteFrameToPlay: Math.floor(this.absoluteFrameToPlay);
+  try {
+    this.trigger('enterFrame');
+    this.renderer.renderFrame(frameToPlay);
+    this.trigger('drawnFrame');
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in renderCurrentFrame: ${error.message} , ${error.stack}`);
+    this.triggerRenderFrameError(error);
+    return false;
+  }
+
+  return true;
+};
+
+AnimationItem.prototype._updateIdleStatus = function () {
+  if (this.isPaused || (!this._hasArea && this.isAutoSkip)) {
+    if (!this._idle) {
+      this._idle = true;
+      this.trigger('_idle', this);
+    }
+  } else {
+    if (this._idle) {
+      this._idle = false;
+      this.trigger('_active', this);
+    }
+  }
+};
+
+AnimationItem.prototype._visibleAreaChanged = function (canvasUniqueId, isVisible) {
+  let hasArea = this._hasArea;
+  this._hasArea = isVisible;
+  if (hasArea !== this._hasArea) {
+    LogUtil.info(`${this._getLogTag()} canvas(${canvasUniqueId}) is ${isVisible ? 'moved in' : 'moved out'}`);
+    this._updateIdleStatus();
+  }
+};
+
+AnimationItem.prototype.play = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} play:  ${this.isPaused ? 'paused' : 'playing'}`);
+
+  if (this.isPaused === true) {
+    this.isPaused = false;
+    this.lastTimestamp = 0;   //æ­¤å¤„èµ‹å€¼ä¸å¯çœæ‰ï¼Œå®ƒå†³å®šäº†æ—¶é—´æ˜¯å¦æš‚åœ
+    this.trigger('_play');
+    LogUtil.info(`${this._getLogTag()} is playing`);
+    this.audioController.resume();
+    this._updateIdleStatus();
+  }
+};
+
+AnimationItem.prototype.pause = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} pause:  ${this.isPaused ? 'paused' : 'playing'}`);
+
+  if (this.isPaused === false) {
+    this.isPaused = true;
+    this.trigger('_pause');
+    LogUtil.info(`${this._getLogTag()} is paused`);
+    this._updateIdleStatus();
+    this.audioController.pause();
+  }
+};
+
+AnimationItem.prototype.togglePause = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} togglePause:  ${this.isPaused ? 'paused' : 'playing'}`);
+  if (this.isPaused === true) {
+    this.play();
+  } else {
+    this.pause();
+  }
+};
+
+AnimationItem.prototype.getNextFrameToPlay = function (frames) {
+  if(frames < 0) {
+    frames = -frames;
+  }
+
+  let nextFrame = frames;
+  if((this._direction > 0 && this.firstFrame > this.endFrame)      // é€†åºsegmentä¸”æ­£å‘æ’­æ”¾
+    || (this._direction < 0 && this.firstFrame < this.endFrame)) { // æ­£åºsegmentä¸”é€†å‘æ’­æ”¾
+    //æ”¹ä¸ºç”¨å¤§å€¼(åˆå§‹å€¼)ä½œä¸ºèµ·ç‚¹
+    nextFrame = this.totalFrames - 1 - frames;
+  }
+
+  return nextFrame;
+};
+
+AnimationItem.prototype._complete = function (name, explicitly) {
+  if (name && this.name !== name) {
+    return;
+  }
+
+  this.pause();
+  LogUtil.info(`${this._getLogTag()} completed${explicitly ? ' explicitly' :
+    ''}.  playing ${this.playCount} times`);
+  // å¦‚æœæ˜¯äººå·¥å¹²é¢„åœæ­¢, åˆ™ä¸è§¦å‘äº‹ä»¶å›è°ƒï¼Œä¿æŒä¸æ—§ç‰ˆæœ¬é€»è¾‘ç›¸åŒ
+  if (!explicitly) {
+    this.trigger('complete');
+  }
+  this.playCount = 0;
+};
+
+AnimationItem.prototype.stop = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+
+  LogUtil.info(`${this._getLogTag()} stop: ${this.isPaused ? 'paused' : 'playing'}`);
+  let nextFrame = this.getNextFrameToPlay(0);
+  this.gotoRelativeFrame(nextFrame);
+  this._complete(name, true);
+};
+
+AnimationItem.prototype.getMarkerData = function (markerName) {
+  var marker;
+  for (var i = 0; i < this.markers.length; i += 1) {
+    marker = this.markers[i];
+    if (marker.payload && marker.payload.name === markerName) {
+      return marker;
+    }
+  }
+  return null;
+};
+
+AnimationItem.prototype.goToAndStop = function (framesOrMarker, isFrame, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} goToAndStop: ${framesOrMarker} ${isFrame ? 'frame' : 'ms(or marker)'} ${name ? name : ''}`);
+
+  if (Number.isNaN(framesOrMarker)) {
+    LogUtil.info(`${this._getLogTag()} goToAndStop: frame is NaN`);
+    return;
+  }
+
+  if (isFrame) {
+    let nextFrame = this.getNextFrameToPlay(framesOrMarker);
+    this.goToFrame(nextFrame);
+  } else {
+    let numValue = Number(framesOrMarker);
+    if (isNaN(numValue)) {
+      let marker = this.getMarkerData(framesOrMarker);
+      if (marker) {
+        this.playCount = 0;
+        if (!marker.duration) {
+          let nextFrame = this.adjustSegment([marker.time, this.animationData.op]);
+          this.goToFrame(nextFrame);
+        } else {
+          let nextFrame = this.adjustSegment([marker.time, marker.time + marker.duration]);
+          this.goToFrame(nextFrame);
+        }
+      }
+    } else {
+      let nextFrame = this.getNextFrameToPlay(framesOrMarker * this.frameModifier);
+      this.goToFrame(nextFrame);
+    }
+  }
+
+  this.pause();
+};
+
+AnimationItem.prototype.goToAndPlay = function (framesOrMarker, isFrame, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} goToAndPlay: ${framesOrMarker} ${isFrame ? 'frame' :
+    'ms(or marker)'} ${name ? name : ''}`);
+
+  if (Number.isNaN(framesOrMarker)) {
+    this.goToAndStop(this.firstFrame, isFrame, name);
+  } else {
+    this.goToAndStop(framesOrMarker, isFrame, name);
+  }
+
+  this.play();
+};
+
+AnimationItem.prototype.resume = function (timeStamp, displaySynced) {
+  if (this.isPaused === true || this.isLoaded === false) {
+    this.lastTimestamp = timeStamp;
+    return;
+  } else if (!this._hasArea && this.isAutoSkip) { //canvaså®Œå…¨éšè—ä¸”ç”¨æˆ·ä¸è¦æ±‚å¼ºè¡Œç»˜åˆ¶æ—¶ï¼Œè·³è¿‡æ‰§è¡Œç»˜åˆ¶ã€‚
+    return;
+  }
+
+  if(displaySynced && this.isFirstLoaded) {
+    /*
+     * åˆšåˆšåŠ è½½å®ŒåŠ¨ç”»å,displaySyncé¦–å¸§çš„timestampè¿˜æ˜¯åŠ è½½åŠ¨ç”»ä¹‹å‰çš„vsyncæ‰€æºå¸¦çš„æ—¶é—´æˆ³ï¼Œåœ¨åŠ¨ç”»è§£ææ—¶é—´è¿‡é•¿çš„åœºæ™¯ä¸‹è¯¥timestampä¼šè¿‡æ—©ä»è€Œå¼•èµ·è·³å¸§ã€‚
+     * æ¯”å¦‚è§£æ30fpsåŠ¨ç”»ï¼Œå‡è®¾éœ€è¦210msï¼Œåˆ™æ—¶é—´æˆ³ä¼šæå‰210mså·¦å³ï¼Œå¯¼è‡´ç»˜åˆ¶é€»è¾‘è®¡ç®—åä¼šè·³è¿‡7å¸§ã€‚
+     * é€šè¿‡ç®€å•è·³è¿‡å¹¶ç›´æ¥ç»˜åˆ¶é¦–å¸§æ¥workaroundã€‚æœ€ç»ˆè¡¨ç°ä¸ºé¦–å¸§ä¼šå¤šæ˜¾ç¤º2ä¸ªå·¦å³çš„å‘¨æœŸã€‚
+     * TODO: å¦‚æœèƒ½å¤Ÿå°†è´Ÿè½½å¸è½½åˆ°å…¶å®ƒçº¿ç¨‹ï¼Œé™ä½ä¸»çº¿ç¨‹è´Ÿè½½ï¼Œåˆ™å¯å°†æ­¤é€»è¾‘ä¼˜åŒ–æ‰ï¼Œå¦åˆ™éœ€è¦ä¿ç•™ï¼Œä»¥ä¾¿ä¿è¯ä»é¦–å¸§å¼€å§‹æ’­æ”¾
+     */
+    LogUtil.info(`${this._getLogTag()} first play.`);
+    this.isFirstLoaded = false;
+    this.lastTimestamp = 0;
+    this.advanceTime(0); // æ’­æ”¾å½“å‰å¸§
+    return;
+  }
+
+  if (this.lastTimestamp === 0) {
+    LogUtil.info(`${this._getLogTag()} start for drawing.`);
+    this.advanceTime(0); // æ’­æ”¾å½“å‰å¸§
+  } else {
+    let elapsedTime = timeStamp - this.lastTimestamp; // displaySync.onframeå›è°ƒå¤„ç†ä¼šä¿è¯timeStampå•è°ƒæ€§ï¼Œä¸å—è®¾å¤‡æ—¶é—´è°ƒæ•´çš„å½±å“
+
+    this.advanceTime(elapsedTime);
+  }
+  this.lastTimestamp = timeStamp;
+}
+
+AnimationItem.prototype.advanceTime = function (elapsedTime) {
+  let nextFrame = this.absoluteFrameToRelative(this.absoluteFrameToPlay) + elapsedTime * this.frameModifier;
+  if (nextFrame >= this.totalFrames || nextFrame < 0) {
+    let frames = nextFrame;
+    if(nextFrame < 0) {
+      frames = -nextFrame + this.totalFrames;
+    }
+
+    if (!this.totalFrames || this.totalFrames <= 0) {
+      LogUtil.error(`${this._getLogTag()} Invalid animation data: totalFrames is 0 or negative, canvas uniqueId is: ${this.wrapper?.canvas?.getUniqueId()}`);
+      return;
+    }
+
+    let loop = true;
+    while (frames >= this.totalFrames && loop && this.totalFrames) {
+      frames -= this.totalFrames;
+      loop = this.checkLoop();
+    }
+
+    if(!loop) {
+      frames = this.totalFrames - 1;
+    }
+    nextFrame = this.getNextFrameToPlay(frames);
+  }
+
+  this.gotoRelativeFrame(nextFrame);
+};
+
+/*
+ * åœ¨å‰åå°åˆ‡æ¢åœºæ™¯ä¸‹ï¼Œä¼šå‡ºç°æ—¶é—´æˆ³è·³å˜çš„æƒ…å†µã€‚
+ * æ­¤æ—¶éœ€è¦è®¡ç®—å‡ºæ­£ç¡®çš„ä¸‹ä¸€å¸§ï¼Œå¹¶æ›´æ–°playCountæ¬¡æ•°
+ */
+AnimationItem.prototype.checkLoop = function () {
+  if ( this.checkSegments() !== -1 ) {
+    return true;
+  }
+
+  this.playCount += 1;
+
+  // total playing 1 times when this.loop = 0, 2 times when loop = 1, 3 times when loop = 2, and so on.
+  if (this.loop === true || this.playCount <= this.loop) {
+    this.trigger('loopComplete');
+    let currentTimestamp = Date.now();
+    if ((currentTimestamp - this._firstTime) > this._loopCompleteTime) {
+      this._firstTime = currentTimestamp;
+      LogUtil.info(`${this._getLogTag()} loopComplete name: ${this.name} from ${this.source}, canvas uniqueId is: ${this.wrapper?.canvas?.getUniqueId()}`);
+      this.renderer?.updateContainerSize(undefined, undefined, true);
+    }
+    return true;
+  } else {
+    //è¾¾åˆ°é¢„æœŸå‚æ•°, æ­£å¸¸æ’­æ”¾å®Œæˆ. åœç•™åœ¨æœ€åä¸€ä¸ªsegmentä¸Šã€‚TODO å¯è€ƒè™‘ä»ç¬¬1ä¸ªsegmenté‡æ–°å¼€å§‹ã€‚è¿™éœ€è¦ä¸ä»segmentsåºåˆ—ä¸­æ¸…é™¤segmentï¼Œå¹¶æŠŠsegmentPoså˜é‡åˆ©ç”¨èµ·æ¥ï¼Œ
+    setTimeout(() => {
+      this._complete();
+    }, 0);
+  }
+
+  return false;
+};
+
+AnimationItem.prototype.adjustSegment = function (arr) {
+  let nextFrame = -1;
+  if(arr[0] === arr[1]) {
+    // åŒºé—´ä¸ºå·¦é—­å³å¼€ï¼Œå› æ­¤ç›¸åŒå·¦å³å€¼æ„å‘³ç€æ²¡æœ‰å¯ç”¨å¸§ï¼Œç›´æ¥è¿”å›æ— æ•ˆå¸§
+    return nextFrame;
+  }
+
+  if (arr[1] < arr[0]) {
+    this.totalFrames = arr[0] - arr[1];
+    this.offsetFrame = arr[1] + 1;    // ä»å¤§åˆ°å°æ’­æ”¾æ—¶ï¼Œå°å€¼ä½œä¸ºç›®çš„å¸§éœ€è¦è¢«æ’é™¤, è€Œå¤§å€¼éœ€è¢«åŒ…å«ï¼Œæ•´ä½“åç§»1å¸§ä¿è¯"å·¦é—­å³å¼€"åŒºé—´
+  } else {
+    this.totalFrames = arr[1] - arr[0];
+    this.offsetFrame = arr[0];
+  }
+
+  this.timeCompleted = this.totalFrames;
+  this.firstFrame = arr[0];
+  this.endFrame = arr[1];
+  this.updateFrameModifier();
+
+  nextFrame = this.getNextFrameToPlay(0);
+
+  this.trigger('segmentStart');
+  return nextFrame;
+};
+
+AnimationItem.prototype.setSegment = function (init, end) {
+  LogUtil.info(`${this._getLogTag()} setSegment: ${init} ~ ${end}`);
+  let nextFrame = this.adjustSegment([init, end]);
+  this.gotoRelativeFrame(nextFrame);
+};
+
+AnimationItem.prototype.playSegments = function (arr, forceFlag) {
+  LogUtil.info(`${this._getLogTag()} playSegments: ${arr}, ${forceFlag ? 'immediate' : 'deferred'}`);
+
+  if (forceFlag) {
+    this.segments.length = 0;
+  }
+  let segmentAvailable = false;
+  if (typeof arr[0] === 'object') { // [ [x,x], [x,x], ...]
+    for (let i = 0; i < arr.length; i += 1) {
+      if (arr[i].length >= 2) {
+        this.segments.push(arr[i]);
+        segmentAvailable = true;
+      }
+    }
+  } else { // [x,x]
+    if (arr.length >= 2) {
+      this.segments.push(arr);
+      segmentAvailable = true;
+    }
+  }
+
+  if(!segmentAvailable) {
+    return;
+  }
+
+  if (forceFlag) {
+    this.playCount = 0; //replay
+    let nextFrame = this.checkSegments();
+    this.gotoRelativeFrame(nextFrame);
+  }
+
+  if (this.isPaused) {
+    this.play();
+  }
+};
+
+AnimationItem.prototype.resetSegments = function (forceFlag) {
+  LogUtil.info(`${this._getLogTag()} resetSegments: ${forceFlag ? 'immediate' : 'deferred'}`);
+
+  this.segments.length = 0;
+  this.segments.push([this.animationData.ip, this.animationData.op]);
+  if (forceFlag) {
+    this.playCount = 0;   //replay
+    let nextFrame = this.checkSegments();
+    this.gotoRelativeFrame(nextFrame);
+  }
+};
+
+AnimationItem.prototype.checkSegments = function () {
+  let nextFrame = -1;
+  while (this.segments.length) {
+    nextFrame = this.adjustSegment(this.segments.shift())
+    if(nextFrame !== -1) {
+      break;
+    }
+    // è·³è¿‡ç©ºç‰‡æ®µ
+  }
+  return nextFrame;
+};
+
+AnimationItem.prototype.destroy = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} destroy${name ? name :
+    ''}, canvas uniqueId: ${this.wrapper?.canvas?.getUniqueId()}`);
+  LogUtil.version();
+  this.stop() // stop the animation because it is dying
+  if (this.renderer) {
+    this.renderer.destroy();
+    this.renderer = null;
+  }
+  if (this.imagePreloader) {
+    this.imagePreloader.destroy();
+    this.imagePreloader = null;
+  }
+  this.trigger('destroy');
+  this._cbs = null;
+  this.onEnterFrame = null;
+  this.onLoopComplete = null;
+  this.onComplete = null;
+  this.onSegmentStart = null;
+  this.onDestroy = null;
+  this.projectInterface = null;
+};
+
+AnimationItem.prototype.relativeFrameToAbsolute = function (relativeFrame) {
+  return relativeFrame + this.offsetFrame;
+};
+
+AnimationItem.prototype.absoluteFrameToRelative = function (absoluteFrame) {
+  return absoluteFrame - this.offsetFrame;
+};
+
+AnimationItem.prototype.gotoRelativeFrame = function (nextValue) {
+  let nextFrame;
+  if (this.totalFrames === nextValue) {
+    nextFrame = nextValue;
+  } else {
+    nextFrame = nextValue % this.totalFrames;
+  }
+
+  if (nextFrame < 0) {
+    nextFrame += this.totalFrames;
+  }
+
+  this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+  this.gotoCurrentFrame(true);
+};
+
+AnimationItem.prototype.goToFrame = function (nextValue) {
+  let nextFrame = nextValue;
+  if (nextFrame < 0) {
+    nextFrame += this.totalFrames;
+  }
+
+  this.absoluteFrameToPlay = this.relativeFrameToAbsolute(nextFrame);
+  this.gotoCurrentFrame(true);
+};
+
+AnimationItem.prototype.setSpeed = function (val) {
+  LogUtil.info(`${this._getLogTag()} setSpeed: ${val}`);
+  if (val === 0) {
+    this.pause(); // å‚è€ƒ index.d.ts setSpeedçš„å¯¹å¤–å£°æ˜ï¼šspeed>0æ­£å‘æ’­æ”¾, speed<0åå‘æ’­æ”¾, speed=0æš‚åœæ’­æ”¾, speed=1.0/-1.0æ­£å¸¸é€Ÿåº¦æ’­æ”¾
+    return;
+  }
+
+  if (val > 0) {
+    this.setDirection(1);
+  } else {
+    this.setDirection(-1);
+  }
+
+  let speed = Math.abs(val); // å‚è€ƒ index.d.ts playSpeedçš„å¯¹å¤–å£°æ˜ï¼šæ’­æ”¾é€Ÿç‡
+  if (this._speed !== speed) {
+    this._speed = speed;
+    this.updateFrameModifier();
+  }
+};
+
+AnimationItem.prototype.setDirection = function (val) {
+  let direction = val < 0 ? -1 : 1;
+  if(this._direction !== direction) {
+    LogUtil.info(`${this._getLogTag()} setDirection: ${val}`);
+
+    this._direction = direction;
+    this.updateFrameModifier();
+  }
+};
+
+AnimationItem.prototype.toggleDirection = function () {
+  LogUtil.info(`${this._getLogTag()} toggleDirection. current is ${this._direction}`);
+  this._direction = -this._direction;
+  this.updateFrameModifier();
+};
+
+AnimationItem.prototype.setLoop = function (isLooping) {
+  this.loop = isLooping;
+};
+
+AnimationItem.prototype.setVolume = function (val, name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  this.audioController.setVolume(val);
+};
+
+AnimationItem.prototype.getVolume = function () {
+  return this.audioController.getVolume();
+};
+
+AnimationItem.prototype.mute = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} mute: ${name ? name : ''}`);
+
+  this.audioController.mute();
+};
+
+AnimationItem.prototype.unmute = function (name) {
+  if (name && this.name !== name) {
+    return;
+  }
+  LogUtil.info(`${this._getLogTag()} unmute: ${name ? name : ''}`);
+
+  this.audioController.unmute();
+};
+
+AnimationItem.prototype.updateFrameModifier = function () {
+  let direction = 1;
+  if (this.firstFrame > this.endFrame) {
+    direction = this._direction > 0 ? -1 : 1; //ç”±å¤§åˆ°å°æ’­æ”¾æ—¶ï¼Œæ­£å‘éœ€è¦ç”¨è´Ÿå€¼ï¼Œåå‘éœ€è¦æ­£å€¼
+  } else {
+    direction = this._direction > 0 ? 1 : -1;
+  }
+
+  let modifier = this._speed * direction;
+  this.frameModifier = this.frameMult * modifier;
+  this.audioController.setRate(modifier);
+};
+
+AnimationItem.prototype.getPath = function () {
+  return this.path;
+};
+
+AnimationItem.prototype.getAssetsPath = function (assetData) {
+  var path = '';
+  if (assetData.e) {
+    path = assetData.p;
+  } else if (this.assetsPath) {
+    var imagePath = assetData.p;
+    if (imagePath.indexOf('images/') !== -1) {
+      imagePath = imagePath.split('/')[1];
+    }
+    path = this.assetsPath + imagePath;
+  } else {
+    path = this.path;
+    path += assetData.u ? assetData.u : '';
+    path += assetData.p;
+  }
+  return path;
+};
+
+AnimationItem.prototype.getAssetData = function (id) {
+  var i = 0;
+  var len = this.assets.length;
+  while (i < len) {
+    if (id === this.assets[i].id) {
+      return this.assets[i];
+    }
+    i += 1;
+  }
+  return null;
+};
+
+AnimationItem.prototype.hide = function () {
+  LogUtil.info(`${this._getLogTag()} hide.`);
+  if (!this.renderer) {
+    return;
+  }
+  this.renderer.hide();
+};
+
+AnimationItem.prototype.show = function () {
+  LogUtil.info(`${this._getLogTag()} show.`);
+  if (!this.renderer) {
+    return;
+  }
+  this.renderer.show();
+};
+
+AnimationItem.prototype.getDuration = function (isFrame) {
+  let duration = isFrame ? this.totalFrames : this.totalFrames / this.frameRate;
+  LogUtil.info(`${this._getLogTag()} getDuration: total ${duration} ${isFrame ? 'frames' : 's'}`);
+  return duration;
+};
+
+AnimationItem.prototype.updateDocumentData = function (path, documentData, index) {
+  if (!this.renderer) {
+    return;
+  }
+  try {
+    var element = this.renderer.getElementByPath(path);
+    element.updateDocumentData(documentData, index);
+  } catch (error) {
+    LogUtil.warn(`${this._getLogTag()} exception in updateDocumentData: ${error.message}`);
+    // TODO: decide how to handle catch case
+  }
+};
+
+AnimationItem.prototype.trigger = function (name, args) {
+  if (this._cbs && this._cbs[name]) {
+    switch (name) {
+      case 'enterFrame':
+        this.triggerEvent(name, new BMEnterFrameEvent(name, this.currentFrame, this.totalFrames, this.frameModifier));
+        break;
+      case 'drawnFrame':
+        this.drawnFrameEvent.currentTime = this.currentFrame;
+        this.drawnFrameEvent.totalTime = this.totalFrames;
+        this.drawnFrameEvent.direction = this.frameModifier;
+        this.triggerEvent(name, this.drawnFrameEvent);
+        break;
+      case 'loopComplete':
+        this.triggerEvent(name, new BMCompleteLoopEvent(name, this.loop, this.playCount, this.frameMult));
+        break;
+      case 'complete':
+        this.triggerEvent(name, new BMCompleteEvent(name, this.frameMult));
+        break;
+      case 'segmentStart':
+        this.triggerEvent(name, new BMSegmentStartEvent(name, this.offsetFrame, this.totalFrames));
+        break;
+      case 'destroy':
+        this.triggerEvent(name, new BMDestroyEvent(name, this));
+        break;
+      default:
+        this.triggerEvent(name, args);
+    }
+  }
+  if (name === 'enterFrame' && this.onEnterFrame) {
+    this.onEnterFrame.call(this, new BMEnterFrameEvent(name, this.currentFrame, this.totalFrames, this.frameMult));
+  }
+  if (name === 'loopComplete' && this.onLoopComplete) {
+    this.onLoopComplete.call(this, new BMCompleteLoopEvent(name, this.loop, this.playCount, this.frameMult));
+  }
+  if (name === 'complete' && this.onComplete) {
+    this.onComplete.call(this, new BMCompleteEvent(name, this.frameMult));
+  }
+  if (name === 'segmentStart' && this.onSegmentStart) {
+    this.onSegmentStart.call(this, new BMSegmentStartEvent(name, this.offsetFrame, this.totalFrames));
+  }
+  if (name === 'destroy' && this.onDestroy) {
+    this.onDestroy.call(this, new BMDestroyEvent(name, this));
+  }
+};
+
+AnimationItem.prototype.triggerRenderFrameError = function (nativeError) {
+  setTimeout(() => {
+    var error = new BMRenderFrameErrorEvent(nativeError, this.currentFrame);
+    this.triggerEvent('error', error);
+
+    if (this.onError) {
+      this.onError.call(this, error);
+    }
+    LogUtil.error(`${this._getLogTag()} triggerRenderFrameError: ${JSON.stringify(error)}`);
+  }, 0);
+};
+
+AnimationItem.prototype.triggerConfigError = function (nativeError) {
+  setTimeout(() => {
+    var error = new BMConfigErrorEvent(nativeError, this.currentFrame);
+    this.triggerEvent('error', error);
+
+    if (this.onError) {
+      this.onError.call(this, error);
+    }
+    LogUtil.error(`${this._getLogTag()} triggerConfigError: ${JSON.stringify(error)}`);
+  }, 0);
+};
+
+export default AnimationItem;
+ÔrF°@ohos.deviceInfo»../utils/functionExtensions¯../utils/common½../renderers/renderersManager±../utils/DataUtil°../utils/LogUtil¾../utils/audio/AudioController¸../utils/DownloadManager²../utils/BaseEvent´../utils/DataManager·../utils/imagePreloader½../utils/markers/markerParserÙ%../utils/expressions/ProjectInterfaceÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÃÙU hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.deviceInfo.d.tsAÃªoh-resolveÂGAÂÙD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsAÃªoh-resolveÂGAÂÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\renderers\renderersManager.jsAÃªoh-resolveÂGAÂÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsAÃªoh-resolveÂGAÂÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsAÃªoh-resolveÂGAÂÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\audio\AudioController.jsAÃªoh-resolveÂGAÂÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DownloadManager.jsAÃªoh-resolveÂGAÂÙ”D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\BaseEvent.jsAÃªoh-resolveÂGAÂÙ–D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataManager.jsAÃªoh-resolveÂGAÂÙ™D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\imagePreloader.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\markers\markerParser.jsAÃªoh-resolveÂGAÂÙ§D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ProjectInterface.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCacheÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration ÌC‘ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÔrL”¤type¥start£end¤nameªIdentifier¯extendPrototypeLªIdentifier¯extendPrototypeÔrM•¤type¥start£end¥value£raw§Literal%ÌB»../utils/functionExtensions½'../utils/functionExtensions'J±ImportDeclarationÌGÌ‹‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifierÌNÌdLªIdentifierÌNÌd¶audioControllerFactoryM§LiteralÌjÌŠ¾../utils/audio/AudioControllerÙ '../utils/audio/AudioController'J±ImportDeclarationÌÍ”šK¯ImportSpecifierÌ™Ì«LªIdentifierÌ™Ì«²getSubframeEnabledLªIdentifierÌ™Ì«²getSubframeEnabledK¯ImportSpecifierÌ°ÌÁLªIdentifierÌ°ÌÁ±BMEnterFrameEventLªIdentifierÌ°ÌÁ±BMEnterFrameEventK¯ImportSpecifierÌÆÌÕLªIdentifierÌÆÌÕ¯BMCompleteEventLªIdentifierÌÆÌÕ¯BMCompleteEventK¯ImportSpecifierÌÚÌíLªIdentifierÌÚÌí³BMCompleteLoopEventLªIdentifierÌÚÌí³BMCompleteLoopEventK¯ImportSpecifierÌòÍLªIdentifierÌòÍ³BMSegmentStartEventLªIdentifierÌòÍ³BMSegmentStartEventK¯ImportSpecifierÍ
+ÍLªIdentifierÍ
+Í®BMDestroyEventLªIdentifierÍ
+Í®BMDestroyEventK¯ImportSpecifierÍÍ4LªIdentifierÍÍ4·BMRenderFrameErrorEventLªIdentifierÍÍ4·BMRenderFrameErrorEventK¯ImportSpecifierÍ9ÍKLªIdentifierÍ9ÍK²BMConfigErrorEventLªIdentifierÍ9ÍK²BMConfigErrorEventK¯ImportSpecifierÍPÍ_LªIdentifierÍPÍ_¯createElementIDLªIdentifierÍPÍ_¯createElementIDK¯ImportSpecifierÍdÍxLªIdentifierÍdÍx´getExpressionsPluginLªIdentifierÍdÍx´getExpressionsPluginM§LiteralÍ‚Í“¯../utils/common±'../utils/common'J±ImportDeclarationÍ–ÍË‘N¶ImportDefaultSpecifierÍÍ«LªIdentifierÍÍ«®ImagePreloaderM§LiteralÍ±ÍÊ·../utils/imagePreloader¹'../utils/imagePreloader'J±ImportDeclarationÍÍÍø‘N¶ImportDefaultSpecifierÍÔÍİLªIdentifierÍÔÍİ©BaseEventM§LiteralÍãÍ÷²../utils/BaseEvent´'../utils/BaseEvent'J±ImportDeclarationÍúÍ)‘N¶ImportDefaultSpecifierÍÍLªIdentifierÍÍ«dataManagerM§LiteralÍÍ(´../utils/DataManager¶'../utils/DataManager'J±ImportDeclarationÍ+Íd‘N¶ImportDefaultSpecifierÍ2Í>LªIdentifierÍ2Í>¬markerParserM§LiteralÍDÍc½../utils/markers/markerParser¿'../utils/markers/markerParser'J±ImportDeclarationÍfÍ«‘N¶ImportDefaultSpecifierÍmÍ}LªIdentifierÍmÍ}°ProjectInterfaceM§LiteralÍƒÍªÙ%../utils/expressions/ProjectInterfaceÙ''../utils/expressions/ProjectInterface'J±ImportDeclarationÍ­Í ’K¯ImportSpecifierÍ¶ÍÁLªIdentifierÍ¶ÍÁ«getRendererLªIdentifierÍ¶ÍÁ«getRendererK¯ImportSpecifierÍÃÍØLªIdentifierÍÃÍØµgetRegisteredRendererLªIdentifierÍÃÍØµgetRegisteredRendererM§LiteralÍàÍÿ½../renderers/renderersManager¿'../renderers/renderersManager'J±ImportDeclarationÍÍ9‘N¶ImportDefaultSpecifierÍ	ÍLªIdentifierÍ	Í¯downloadManagerM§LiteralÍÍ8¸../utils/DownloadManagerº'../utils/DownloadManager'J±ImportDeclarationÍ;ÍšK¯ImportSpecifierÍGÍOLªIdentifierÍGÍO¨readJsonLªIdentifierÍGÍO¨readJsonK¯ImportSpecifierÍTÍ`LªIdentifierÍTÍ`¬handleAssetsLªIdentifierÍTÍ`¬handleAssetsK¯ImportSpecifierÍeÍsLªIdentifierÍeÍs®createFilesDirLªIdentifierÍeÍs®createFilesDirK¯ImportSpecifierÍxÍ‡LªIdentifierÍxÍ‡¯handleZipAssetsLªIdentifierÍxÍ‡¯handleZipAssetsK¯ImportSpecifierÍŒÍ˜LªIdentifierÍŒÍ˜¬isCacheExistLªIdentifierÍŒÍ˜¬isCacheExistK¯ImportSpecifierÍÍ¦LªIdentifierÍÍ¦©isHaveImgLªIdentifierÍÍ¦©isHaveImgK¯ImportSpecifierÍ«Í¾LªIdentifierÍ«Í¾³createImageFilesDirLªIdentifierÍ«Í¾³createImageFilesDirK¯ImportSpecifierÍÃÍÍLªIdentifierÍÃÍÍªisJsonFileLªIdentifierÍÃÍÍªisJsonFileK¯ImportSpecifierÍÒÍáLªIdentifierÍÒÍá¯isCompressdFileLªIdentifierÍÒÍá¯isCompressdFileK¯ImportSpecifierÍæÍúLªIdentifierÍæÍú´isExistNetworkAssetsLªIdentifierÍæÍú´isExistNetworkAssetsM§LiteralÍÍ±../utils/DataUtil³'../utils/DataUtil'J±ImportDeclarationÍÍA‘K¯ImportSpecifierÍ!Í(LªIdentifierÍ!Í(§LogUtilLªIdentifierÍ!Í(§LogUtilM§LiteralÍ/ÍA°../utils/LogUtil²'../utils/LogUtil'J±ImportDeclarationÍCÍm‘N¶ImportDefaultSpecifierÍJÍTLªIdentifierÍJÍTªdeviceInfoM§LiteralÍZÍl°@ohos.deviceInfo²'@ohos.deviceInfo'
