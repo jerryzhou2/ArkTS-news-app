@@ -23,6 +23,8 @@ export default class EntryAbility extends UIAbility {
     // 缓存当前设备的颜色模式
     AppStorage.setOrCreate('currentColorMode', this.context.config.colorMode);
     hilog.info(0x0000, 'testTag', `currentColorMode: ${this.context.config.colorMode}`);
+    // 初始化全局搜索关键字
+    AppStorage.setOrCreate('searchKeyword', '');
   }
 
   onDestroy(): void {

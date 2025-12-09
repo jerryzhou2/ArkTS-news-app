@@ -49,8 +49,10 @@ export struct PullToRefreshNews {
   // PullToRefreshNews.ets
   @State newsData: NewsDataSource = new NewsDataSource();
   // [End news_data]
+  private allNews: NewsData[] = [];
   @State firstIndex: number = 0;
   @StorageLink('currentBreakpoint') currentBreakpoint: string = BreakpointConstants.BREAKPOINT_LG;
+  @Watch('onSearchKeywordChange') @StorageLink('searchKeyword') searchKeyword: string = '';
   private mockFlag: boolean = true;
   private scroller: Scroller = new Scroller();
   readonly ANIMATION_DURATION: number = 500;
@@ -58,9 +60,11 @@ export struct PullToRefreshNews {
 
   aboutToAppear() {
     let newsModelMockData: NewsData[] = getNews(MOCK_DATA_FILE_ONE_DIR);
+    this.allNews = [];
     for (let j = CommonConstants.ZERO; j < NEWS_MOCK_DATA_COUNT; j++) {
-      this.newsData.pushData(newsModelMockData[j]);
+      this.allNews.push(newsModelMockData[j]);
     }
+    this.applyFilter();
   }
 
   build() {
@@ -78,7 +82,6 @@ export struct PullToRefreshNews {
             return new Promise<string>((resolve, reject) => {
               // [StartExclude pull_to_refresh1]
               setTimeout(() => {
-                this.newsData.clear();
                 let newsModelMockData: NewsData[] = [];
                 if (this.mockFlag) {
                   newsModelMockData = getNews(MOCK_DATA_FILE_TWO_DIR);
@@ -86,9 +89,11 @@ export struct PullToRefreshNews {
                   newsModelMockData = getNews(MOCK_DATA_FILE_ONE_DIR);
                 }
                 this.mockFlag = !this.mockFlag;
+                this.allNews = [];
                 for (let j = CommonConstants.ZERO; j < NEWS_MOCK_DATA_COUNT; j++) {
-                  this.newsData.pushData(newsModelMockData[j]);
+                  this.allNews.push(newsModelMockData[j]);
                 }
+                this.applyFilter();
                 resolve(NEWS_RESOLVE_SUCCESS);
                 // [EndExclude pull_to_refresh1]
               }, NEWS_REFRESH_TIME);
@@ -100,8 +105,9 @@ export struct PullToRefreshNews {
               setTimeout(() => {
                 let newsModelMockData: NewsData[] = getNews(MOCK_DATA_FILE_ONE_DIR);
                 for (let j = CommonConstants.ZERO; j < NEWS_MOCK_DATA_COUNT; j++) {
-                  this.newsData.pushData(newsModelMockData[j]);
+                  this.allNews.push(newsModelMockData[j]);
                 }
+                this.applyFilter();
                 resolve(NEWS_RESOLVE_SUCCESS);
               }, NEWS_REFRESH_TIME);
               // [EndExclude pull_to_refresh1]
@@ -187,6 +193,30 @@ export struct PullToRefreshNews {
 
   aboutToDisappear() {
     this.newsData.clear();
+  }
+
+  private applyFilter() {
+    this.newsData.clear();
+    const keyword: string = this.searchKeyword ? this.searchKeyword.trim().toLowerCase() : '';
+    if (keyword === '') {
+      for (let i = CommonConstants.ZERO; i < this.allNews.length; i++) {
+        this.newsData.pushData(this.allNews[i]);
+      }
+      return;
+    }
+
+    for (let i = CommonConstants.ZERO; i < this.allNews.length; i++) {
+      const item: NewsData = this.allNews[i];
+      const title: string = String(item.newsTitle).toLowerCase();
+      const content: string = String(item.newsContent).toLowerCase();
+      if (title.indexOf(keyword) !== -1 || content.indexOf(keyword) !== -1) {
+        this.newsData.pushData(item);
+      }
+    }
+  }
+
+  private onSearchKeywordChange() {
+    this.applyFilter();
   }
 }
 
