@@ -60,7 +60,7 @@ export struct MyProfileView {
           .padding({ left: 16, right: 16 })
           .backgroundColor(Color.White)
           .justifyContent(FlexAlign.Center)
-          
+
           ChangePasswordView({
             onClose: () => {
               this.showChangePassword = false;
@@ -87,7 +87,7 @@ export struct MyProfileView {
           .padding({ left: 16, right: 16 })
           .backgroundColor(Color.White)
           .justifyContent(FlexAlign.Center)
-          
+
           UserSettingsView({
             onClose: () => {
               this.showSettings = false;

@@ -3,7 +3,6 @@
     "pages/Index",
     "pages/CitySearch",
     "pages/NewsDetail",
-    "pages/CommentPage",
     "pages/Login",
     "pages/Register"
   ]
