@@ -79,8 +79,10 @@ struct CommentItem {
   onLikeChange: (index: number, isLiked: boolean, likes: number) => void = () => {}
   build() {
     Row() {
+      // 用户头像占位符
       Circle()
-        .width(40).height(40)
+        .width(40)
+        .height(40)
         .backgroundColor($r('app.color.start_window_background'))
         .margin({ right: 12 })
 
@@ -277,6 +279,7 @@ struct NewsDetail {
     );
 
     // 显示收藏提示
+    // 更新对话框控制器，传入当前最新的收藏状态
     this.collectToastController = new CustomDialogController({
       builder: CollectToast({ isCollected: this.newsItem.isCollected }),
       alignment: DialogAlignment.Bottom,
