@@ -31,6 +31,10 @@ export class CommonConstants {
    */
   public static readonly FONT_WEIGHT_500: number = 500;
   /**
+   * Font weight 600.
+   */
+  public static readonly FONT_WEIGHT_600: number = 600;
+  /**
    * Font weight 400.
    */
   public static readonly FONT_WEIGHT_400: number = 400;

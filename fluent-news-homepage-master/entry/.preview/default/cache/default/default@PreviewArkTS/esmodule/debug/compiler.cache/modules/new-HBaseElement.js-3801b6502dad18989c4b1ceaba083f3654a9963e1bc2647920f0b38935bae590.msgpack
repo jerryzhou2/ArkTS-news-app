@@ -1,0 +1,266 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚÛimport {
+  styleDiv,
+} from '../../utils/common';
+import createNS from '../../utils/helpers/svg_elements';
+import createTag from '../../utils/helpers/html_elements';
+import BaseRenderer from '../../renderers/BaseRenderer';
+import SVGBaseElement from '../svgElements/SVGBaseElement';
+import CVEffects from '../canvasElements/CVEffects';
+import MaskElement from '../../mask';
+
+function HBaseElement() {}
+HBaseElement.prototype = {
+  checkBlendMode: function () {},
+  initRendererElement: function () {
+    this.baseElement = createTag(this.data.tg || 'div');
+    if (this.data.hasMask) {
+      this.svgElement = createNS('svg');
+      this.layerElement = createNS('g');
+      this.maskedElement = this.layerElement;
+      this.svgElement.appendChild(this.layerElement);
+      this.baseElement.appendChild(this.svgElement);
+    } else {
+      this.layerElement = this.baseElement;
+    }
+    styleDiv(this.baseElement);
+  },
+  createContainerElements: function () {
+    this.renderableEffectsManager = new CVEffects(this);
+    this.transformedElement = this.baseElement;
+    this.maskedElement = this.layerElement;
+    if (this.data.ln) {
+      this.layerElement.setAttribute('id', this.data.ln);
+    }
+    if (this.data.cl) {
+      this.layerElement.setAttribute('class', this.data.cl);
+    }
+    if (this.data.bm !== 0) {
+      this.setBlendMode();
+    }
+  },
+  renderElement: function () {
+    var transformedElementStyle = this.transformedElement ? this.transformedElement.style : {};
+    if (this.finalTransform._matMdf) {
+      var matrixValue = this.finalTransform.mat.toCSS();
+      transformedElementStyle.transform = matrixValue;
+      transformedElementStyle.webkitTransform = matrixValue;
+    }
+    if (this.finalTransform._opMdf) {
+      transformedElementStyle.opacity = this.finalTransform.mProp.o.v;
+    }
+  },
+  renderFrame: function () {
+    // If it is exported as hidden (data.hd === true) no need to render
+    // If it is not visible no need to render
+    if (this.data.hd || this.hidden) {
+      return;
+    }
+    this.renderTransform();
+    this.renderRenderable();
+    this.renderElement();
+    this.renderInnerContent();
+    if (this._isFirstFrame) {
+      this._isFirstFrame = false;
+    }
+  },
+  destroy: function () {
+    this.layerElement = null;
+    this.transformedElement = null;
+    if (this.matteElement) {
+      this.matteElement = null;
+    }
+    if (this.maskManager) {
+      this.maskManager.destroy();
+      this.maskManager = null;
+    }
+  },
+  createRenderableComponents: function () {
+    this.maskManager = new MaskElement(this.data, this, this.globalData);
+  },
+  addEffects: function () {
+  },
+  setMatte: function () {},
+};
+HBaseElement.prototype.getBaseElement = SVGBaseElement.prototype.getBaseElement;
+HBaseElement.prototype.destroyBaseElement = HBaseElement.prototype.destroy;
+HBaseElement.prototype.buildElementParenting = BaseRenderer.prototype.buildElementParenting;
+
+export default HBaseElement;
+Â—Ù‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\svg_elements.jsÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\html_elements.jsÙ›D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\renderers\BaseRenderer.jsÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\svgElements\SVGBaseElement.jsÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\canvasElements\CVEffects.jsÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\mask.jsÙ§D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\htmlElements\HBaseElement.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚÛimport {
+  styleDiv,
+} from '../../utils/common';
+import createNS from '../../utils/helpers/svg_elements';
+import createTag from '../../utils/helpers/html_elements';
+import BaseRenderer from '../../renderers/BaseRenderer';
+import SVGBaseElement from '../svgElements/SVGBaseElement';
+import CVEffects from '../canvasElements/CVEffects';
+import MaskElement from '../../mask';
+
+function HBaseElement() {}
+HBaseElement.prototype = {
+  checkBlendMode: function () {},
+  initRendererElement: function () {
+    this.baseElement = createTag(this.data.tg || 'div');
+    if (this.data.hasMask) {
+      this.svgElement = createNS('svg');
+      this.layerElement = createNS('g');
+      this.maskedElement = this.layerElement;
+      this.svgElement.appendChild(this.layerElement);
+      this.baseElement.appendChild(this.svgElement);
+    } else {
+      this.layerElement = this.baseElement;
+    }
+    styleDiv(this.baseElement);
+  },
+  createContainerElements: function () {
+    this.renderableEffectsManager = new CVEffects(this);
+    this.transformedElement = this.baseElement;
+    this.maskedElement = this.layerElement;
+    if (this.data.ln) {
+      this.layerElement.setAttribute('id', this.data.ln);
+    }
+    if (this.data.cl) {
+      this.layerElement.setAttribute('class', this.data.cl);
+    }
+    if (this.data.bm !== 0) {
+      this.setBlendMode();
+    }
+  },
+  renderElement: function () {
+    var transformedElementStyle = this.transformedElement ? this.transformedElement.style : {};
+    if (this.finalTransform._matMdf) {
+      var matrixValue = this.finalTransform.mat.toCSS();
+      transformedElementStyle.transform = matrixValue;
+      transformedElementStyle.webkitTransform = matrixValue;
+    }
+    if (this.finalTransform._opMdf) {
+      transformedElementStyle.opacity = this.finalTransform.mProp.o.v;
+    }
+  },
+  renderFrame: function () {
+    // If it is exported as hidden (data.hd === true) no need to render
+    // If it is not visible no need to render
+    if (this.data.hd || this.hidden) {
+      return;
+    }
+    this.renderTransform();
+    this.renderRenderable();
+    this.renderElement();
+    this.renderInnerContent();
+    if (this._isFirstFrame) {
+      this._isFirstFrame = false;
+    }
+  },
+  destroy: function () {
+    this.layerElement = null;
+    this.transformedElement = null;
+    if (this.matteElement) {
+      this.matteElement = null;
+    }
+    if (this.maskManager) {
+      this.maskManager.destroy();
+      this.maskManager = null;
+    }
+  },
+  createRenderableComponents: function () {
+    this.maskManager = new MaskElement(this.data, this, this.globalData);
+  },
+  addEffects: function () {
+  },
+  setMatte: function () {},
+};
+HBaseElement.prototype.getBaseElement = SVGBaseElement.prototype.getBaseElement;
+HBaseElement.prototype.destroyBaseElement = HBaseElement.prototype.destroy;
+HBaseElement.prototype.buildElementParenting = BaseRenderer.prototype.buildElementParenting;
+
+export default HBaseElement;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ Y‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘Ù§D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\htmlElements\HBaseElement.js‘ÚÛimport {
+  styleDiv,
+} from '../../utils/common';
+import createNS from '../../utils/helpers/svg_elements';
+import createTag from '../../utils/helpers/html_elements';
+import BaseRenderer from '../../renderers/BaseRenderer';
+import SVGBaseElement from '../svgElements/SVGBaseElement';
+import CVEffects from '../canvasElements/CVEffects';
+import MaskElement from '../../mask';
+
+function HBaseElement() {}
+HBaseElement.prototype = {
+  checkBlendMode: function () {},
+  initRendererElement: function () {
+    this.baseElement = createTag(this.data.tg || 'div');
+    if (this.data.hasMask) {
+      this.svgElement = createNS('svg');
+      this.layerElement = createNS('g');
+      this.maskedElement = this.layerElement;
+      this.svgElement.appendChild(this.layerElement);
+      this.baseElement.appendChild(this.svgElement);
+    } else {
+      this.layerElement = this.baseElement;
+    }
+    styleDiv(this.baseElement);
+  },
+  createContainerElements: function () {
+    this.renderableEffectsManager = new CVEffects(this);
+    this.transformedElement = this.baseElement;
+    this.maskedElement = this.layerElement;
+    if (this.data.ln) {
+      this.layerElement.setAttribute('id', this.data.ln);
+    }
+    if (this.data.cl) {
+      this.layerElement.setAttribute('class', this.data.cl);
+    }
+    if (this.data.bm !== 0) {
+      this.setBlendMode();
+    }
+  },
+  renderElement: function () {
+    var transformedElementStyle = this.transformedElement ? this.transformedElement.style : {};
+    if (this.finalTransform._matMdf) {
+      var matrixValue = this.finalTransform.mat.toCSS();
+      transformedElementStyle.transform = matrixValue;
+      transformedElementStyle.webkitTransform = matrixValue;
+    }
+    if (this.finalTransform._opMdf) {
+      transformedElementStyle.opacity = this.finalTransform.mProp.o.v;
+    }
+  },
+  renderFrame: function () {
+    // If it is exported as hidden (data.hd === true) no need to render
+    // If it is not visible no need to render
+    if (this.data.hd || this.hidden) {
+      return;
+    }
+    this.renderTransform();
+    this.renderRenderable();
+    this.renderElement();
+    this.renderInnerContent();
+    if (this._isFirstFrame) {
+      this._isFirstFrame = false;
+    }
+  },
+  destroy: function () {
+    this.layerElement = null;
+    this.transformedElement = null;
+    if (this.matteElement) {
+      this.matteElement = null;
+    }
+    if (this.maskManager) {
+      this.maskManager.destroy();
+      this.maskManager = null;
+    }
+  },
+  createRenderableComponents: function () {
+    this.maskManager = new MaskElement(this.data, this, this.globalData);
+  },
+  addEffects: function () {
+  },
+  setMatte: function () {},
+};
+HBaseElement.prototype.getBaseElement = SVGBaseElement.prototype.getBaseElement;
+HBaseElement.prototype.destroyBaseElement = HBaseElement.prototype.destroy;
+HBaseElement.prototype.buildElementParenting = BaseRenderer.prototype.buildElementParenting;
+
+export default HBaseElement;
+ÔrF—²../../utils/commonÙ ../../utils/helpers/svg_elementsÙ!../../utils/helpers/html_elements¼../../renderers/BaseRenderer½../svgElements/SVGBaseElement»../canvasElements/CVEffectsª../../maskÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\svg_elements.jsAÃªoh-resolveÂGAÂÙ D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\html_elements.jsAÃªoh-resolveÂGAÂÙ›D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\renderers\BaseRenderer.jsAÃªoh-resolveÂGAÂÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\svgElements\SVGBaseElement.jsAÃªoh-resolveÂGAÂÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\canvasElements\CVEffects.jsAÃªoh-resolveÂGAÂÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\mask.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache—ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration 3‘ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÔrL”¤type¥start£end¤nameªIdentifier¨styleDivLªIdentifier¨styleDivÔrM•¤type¥start£end¥value£raw§Literal2²../../utils/common´'../../utils/common'J±ImportDeclaration5Ìm‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifier<ÌDLªIdentifier<ÌD¨createNSM§LiteralÌJÌlÙ ../../utils/helpers/svg_elementsÙ"'../../utils/helpers/svg_elements'J±ImportDeclarationÌoÌ©‘N¶ImportDefaultSpecifierÌvÌLªIdentifierÌvÌ©createTagM§LiteralÌ…Ì¨Ù!../../utils/helpers/html_elementsÙ#'../../utils/helpers/html_elements'J±ImportDeclarationÌ«Ìã‘N¶ImportDefaultSpecifierÌ²Ì¾LªIdentifierÌ²Ì¾¬BaseRendererM§LiteralÌÄÌâ¼../../renderers/BaseRenderer¾'../../renderers/BaseRenderer'J±ImportDeclarationÌåÍ ‘N¶ImportDefaultSpecifierÌìÌúLªIdentifierÌìÌú®SVGBaseElementM§LiteralÍ Í½../svgElements/SVGBaseElement¿'../svgElements/SVGBaseElement'J±ImportDeclarationÍ"ÍV‘N¶ImportDefaultSpecifierÍ)Í2LªIdentifierÍ)Í2©CVEffectsM§LiteralÍ8ÍU»../canvasElements/CVEffects½'../canvasElements/CVEffects'J±ImportDeclarationÍXÍ}‘N¶ImportDefaultSpecifierÍ_ÍjLªIdentifierÍ_Íj«MaskElementM§LiteralÍpÍ|ª../../mask¬'../../mask'

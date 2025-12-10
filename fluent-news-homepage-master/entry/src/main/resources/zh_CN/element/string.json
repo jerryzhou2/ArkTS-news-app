@@ -169,6 +169,22 @@
       "value": "财经"
     },
     {
+      "name": "back",
+      "value": "返回"
+    },
+    {
+      "name": "news_detail_time_margin_top",
+      "value": "10vp"
+    },
+    {
+      "name": "news_detail_image_margin_top",
+      "value": "20vp"
+    },
+    {
+      "name": "news_detail_content_margin_top",
+      "value": "20vp"
+    },
+    {
       "name": "location_desc",
       "value": "允许应用在新闻首页场景获取设备位置信息"
     },

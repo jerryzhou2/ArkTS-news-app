@@ -1,0 +1,1157 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚ2Æ/*
+ * Copyright (C) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an 'AS IS' BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import fs from '@ohos.file.fs';
+import util from '@ohos.util';
+import zlib from '@ohos.zlib';
+import { moveFileSync, mkdirSync, listFileSync, readFileSync, isSandboxFileExist } from './FileUtil';
+import {LogUtil} from './LogUtil';
+
+/**
+ * è¿‡æ»¤å¹¶è¿”å›æŒ‡å®šç›®å½•ä¸‹çš„ JSON æ–‡ä»¶
+ *
+ * @param way - è¦æ‰«æçš„ç›®å½•è·¯å¾„
+ * @param isDotLottiePath - æ˜¯å¦ä¸º .lottie æ–‡ä»¶è·¯å¾„çš„æ ‡å¿—
+ * @returns è¿”å›æ‰¾åˆ°çš„ JSON æ–‡ä»¶åï¼Œå¦‚æœæ²¡æœ‰æ‰¾åˆ°åˆ™è¿”å› undefined
+ */
+const filterJson = function (way, isDotLottiePath) {
+  try {
+    // ä»¥åŒæ­¥æ–¹å¼åˆ—å‡ºæ–‡ä»¶å¤¹ä¸‹æ‰€æœ‰æ–‡ä»¶å
+    let files = listFileSync(way, ['.json']);
+    if (isDotLottiePath) {
+      return files.find(item => {
+        return item !== 'manifest.json' && item.endsWith('.json');
+      });
+    } else {
+      return files.find(item => item.endsWith('.json'));
+    }
+  } catch (err) {
+    LogUtil.error(`Method filterJson err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®šç›®å½•ä¸‹æ˜¯å¦å­˜åœ¨åŒ…å« JSON æ–‡ä»¶çš„å­ç›®å½•
+ *
+ * @param way - è¦æ‰«æçš„ç›®å½•è·¯å¾„
+ * @param isDotLottiePath - æ˜¯å¦ä¸º .lottie æ–‡ä»¶è·¯å¾„çš„æ ‡å¿—
+ * @returns è¿”å›æ‰¾åˆ°çš„åŒ…å« JSON æ–‡ä»¶çš„å­ç›®å½•åï¼Œå¦‚æœæ²¡æœ‰æ‰¾åˆ°åˆ™è¿”å› null
+ */
+const isHaveDirectory = function (way, isDotLottiePath) {
+  try {
+    // ä»¥åŒæ­¥æ–¹å¼åˆ—å‡ºæ–‡ä»¶å¤¹ä¸‹æ‰€æœ‰æ–‡ä»¶å
+    let files = listFileSync(way, ['.json']);
+    for (let i = 0; i < files.length; i++) {
+      let isDirectory = fs.statSync(`${way}/${files[i]}`).isDirectory();
+      if (isDirectory && files[i] !== '__MACOSX' && files[i] !== 'images') {
+        if (filterJson(`${way}/${files[i]}`, isDotLottiePath)) {
+          return files[i];
+        }
+      }
+    }
+  } catch (err) {
+    LogUtil.error(`Method isHaveDirectory err: ${JSON.stringify(err)}`);
+  }
+  return null;
+};
+
+/**
+ * å°†æŒ‡å®šç›®å½•ä¸‹çš„å›¾ç‰‡æ–‡ä»¶ç§»åŠ¨åˆ°ç›®æ ‡ç›®å½•çš„ images æ–‡ä»¶å¤¹ä¸­
+ *
+ * @param routerDir  - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @param way - ç›¸å¯¹è·¯å¾„ï¼Œç”¨äºæŒ‡å®šæºç›®å½•çš„ä½ç½®
+ */
+const moveImages = function (routerDir, way) {
+  try {
+    // filesåˆ›å»ºæ–°imagesæ–‡ä»¶å¤¹
+    let dirPath = `${routerDir}/images`;
+    mkdirSync(dirPath);
+    let newWay = `${routerDir}/${way}/images`;
+    let files = listFileSync(newWay, ['.png', '.jpg', '.jpeg']);
+    for (let i = 0; i < files.length; i++) {
+      let srcPath = `${newWay}/${files[i]}`;
+      let destPath = `${dirPath}/${files[i]}`;
+      moveFileSync(srcPath, destPath);
+    }
+  } catch (err) {
+    LogUtil.error(`Method moveImages err: ${JSON.stringify(err)}`);
+  }
+};
+
+/**
+ * å°†æŒ‡å®šç›®å½•ä¸‹çš„ JSON æ–‡ä»¶ç§»åŠ¨åˆ°ç›®æ ‡ç›®å½•ä¸­
+ *
+ * @param routerDir - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @param way - ç›¸å¯¹è·¯å¾„ï¼Œç”¨äºæŒ‡å®šæºç›®å½•çš„ä½ç½®
+ */
+const moveJson = function (routerDir, way) {
+  try {
+    let jsonWay = `${routerDir}/${way}`;
+    let jsonFile = listFileSync(jsonWay, ['.json']);
+    let newJson = jsonFile.find(item => item.endsWith('.json'));
+    let srcPath = `${jsonWay}/${newJson}`;
+    let destPath = `${routerDir}/${newJson}`;
+    moveFileSync(srcPath, destPath);
+  } catch (err) {
+    LogUtil.error(`Method moveJson err: ${JSON.stringify(err)}`);
+  }
+};
+
+/**
+ *  è§£å‹ç¼©å¹¶è¯»å– JSON æ–‡ä»¶
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param cacheDir - ç¼“å­˜ç›®å½•è·¯å¾„
+ * @param fileDir - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ª Promiseï¼Œè§£æä¸ºå¤„ç†åçš„ JSON æ•°æ®
+ */
+export const decompressAndReadJson = function (url, cacheDir, fileDir) {
+  const lastIndex = url.lastIndexOf('/');
+  const result = url.substring(lastIndex + 1);
+  let isDotLottiePath = url.endsWith('.lottie');
+  let inFile = `${cacheDir}/${result}`;
+  let outFile = fileDir;
+  let options = {
+    level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION,
+    memLevel: zlib.MemLevel.MEM_LEVEL_MAX,
+    strategy: zlib.CompressStrategy.COMPRESS_STRATEGY_DEFAULT_STRATEGY,
+  };
+  return new Promise((resolve, reject) => {
+    zlib.decompressFile(inFile, outFile, options).then((data) => {
+      // è§£å‹å®Œæˆä¹‹åè¯»å– json æ•°æ®
+      if (isHaveDirectory(fileDir, isDotLottiePath)) {
+        let newFileDir = isHaveDirectory(fileDir, isDotLottiePath);
+        moveImages(fileDir, newFileDir);
+        moveJson(fileDir, newFileDir);
+        let zipData = readJson(url, fileDir);
+        // ä¿®æ”¹uè·¯å¾„
+        let newZipData = handleZipAssets(zipData, fileDir);
+        resolve(newZipData);
+      } else {
+        let zipData = readJson(url, fileDir);
+        // ä¿®æ”¹uè·¯å¾„
+        let newZipData = handleZipAssets(zipData, fileDir);
+        resolve(newZipData);
+      }
+    }).catch((errData) => {
+      reject(errData);
+    });
+  });
+};
+
+/**
+ * è¯»å–å¹¶è§£æ JSON æ–‡ä»¶
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param readPath - è¯»å–è·¯å¾„
+ * @param errCallBack - é”™è¯¯å›è°ƒå‡½æ•°
+ * @returns è¿”å›è§£æåçš„ JSON å¯¹è±¡ï¼Œå¦‚æœæ²¡æœ‰è§£ææˆåŠŸåˆ™è¿”å› undefined
+ */
+export const readJson = function (url, readPath, errCallBack) {
+  try {
+    let textDecoderOptions = {
+      fatal: false,
+      ignoreBOM : true,
+    };
+    let resStr = util.TextDecoder.create('utf-8', textDecoderOptions);
+    let existResult = isCacheExist(url, readPath);
+    if (existResult?.isExist) {
+      let arrayBuffer = readFileSync(existResult.filePath);
+      // è§£ç çš„jsonæ•°æ®
+      let lottieStr = resStr.decodeToString(new Uint8Array(arrayBuffer));
+      return JSON.parse(lottieStr);
+    }
+    return undefined;
+  } catch (err) {
+    LogUtil.error(`Method readJson err: ${JSON.stringify(err)}`);
+    if (errCallBack) {
+      errCallBack('error', err);
+    }
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®š URL å¯¹åº”çš„æ–‡ä»¶æ˜¯å¦å­˜åœ¨äºç¼“å­˜ä¸­
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param readPath - è¯»å–è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ªåŒ…å«æ˜¯å¦å­˜åœ¨æ–‡ä»¶å’Œæ–‡ä»¶è·¯å¾„çš„å¯¹è±¡ï¼Œå¦‚æœå‡ºé”™åˆ™è¿”å› undefined
+ */
+export const isCacheExist = function (url, readPath) {
+  try {
+    const lastIndex = url.lastIndexOf('/');
+    const result = url.substring(lastIndex + 1); // æœ€åä¸€ä¸ªæ–œæ åçš„å­—ç¬¦ä¸²  `${readPath}/${filterJson(readPath, url.endsWith('.lottie'))}`
+    // é€šè¿‡æ²™ç®±ä¸­ä¸‹è½½æˆ–è€…è§£å‹çš„æ–‡ä»¶åæ¥æ‰¾åˆ°æ–‡ä»¶æ‰€åœ¨è·¯å¾„
+    let filePath = hasSuffix(url, ['.json', '.js']) ? `${readPath}/${result}` :
+      `${readPath}/${filterJson(readPath, url.endsWith('.lottie'))}`;
+    // åŒæ­¥æ–¹æ³•åˆ¤æ–­æ²™ç®±é‡Œçš„æ–‡ä»¶æ˜¯å¦å­˜åœ¨
+    let isExist = isSandboxFileExist(filePath);
+    return {
+      isExist,
+      filePath,
+    };
+  } catch (err) {
+    LogUtil.error(`Method isCacheExist err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®šè·¯å¾„ä¸‹æ˜¯å¦å­˜åœ¨å›¾ç‰‡æ–‡ä»¶
+ *
+ * @param way - ç›®æ ‡è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤ºæ˜¯å¦å­˜åœ¨å›¾ç‰‡æ–‡ä»¶ï¼Œå¦‚æœå‡ºé”™åˆ™è¿”å› undefined
+ */
+export const isHaveImg = function (way) {
+  try {
+    let imgFiles = listFileSync(way, ['.png', '.jpg', '.jpeg']);
+    return imgFiles.some(item => {
+      return item.endsWith('.png') || item.endsWith('.jpg') || item.endsWith('.jpeg');
+    });
+  } catch (err) {
+    LogUtil.error(`Method isCacheExist err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+
+/**
+ * æ£€æŸ¥URLæ˜¯å¦ä»¥æŒ‡å®šçš„åç¼€ç»“å°¾
+ *
+ * @param url - éœ€è¦æ£€æŸ¥çš„URLå­—ç¬¦ä¸²
+ * @param suffixes - å…è®¸çš„æ–‡ä»¶åç¼€æ•°ç»„ï¼ˆå¦‚['.json', '.js']ï¼‰
+ * @returns å¦‚æœURLä»¥æŒ‡å®šåç¼€ä¹‹ä¸€ç»“å°¾åˆ™è¿”å›trueï¼Œå¦åˆ™è¿”å›false
+ */
+const hasSuffix = function (url, suffixes) {
+  const lastDotIndex = url.lastIndexOf('.');
+  return lastDotIndex !== -1 && lastDotIndex < url.length - 1 && suffixes.includes(url.substring(lastDotIndex));
+};
+
+
+/**
+ * å¤„ç† Lottie åŠ¨ç”»æ•°æ®ä¸­çš„èµ„æºè·¯å¾„
+ *
+ * @param lottieData - Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ * @returns è¿”å›å¤„ç†åçš„ Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ */
+export const handleAssets = function (lottieData) {
+  let updatedAssets = lottieData?.assets?.map((item, index) => {
+    if (item.id && item.p && item.p.startsWith('http')) {
+      item.p = `${item.id}.png`;
+      if (!item.u) {
+        item.u = 'lottie/loadImages/';
+        item.e = 0;
+      }
+    }
+    return item;
+  });
+  lottieData.assets = updatedAssets;
+  return lottieData;
+};
+
+/**
+ * å¤„ç† ZIP å‹ç¼©åŒ…ä¸­çš„ Lottie åŠ¨ç”»èµ„æºè·¯å¾„
+ *
+ * @param lottieData - Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ * @param zipRoute - ZIP æ–‡ä»¶çš„è·¯å¾„
+ * @returns è¿”å›å¤„ç†åçš„ Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ */
+export const handleZipAssets = function (lottieData, zipRoute) {
+  const parts = zipRoute.split('/');
+  const lastPart = parts.slice(-3);
+  let lastPartStr = '';
+  if (Array.isArray(lastPart)) {
+    lastPartStr = lastPart.join('/');
+  }
+  // ä¿®æ”¹uè·¯å¾„
+  let updatedZipAssets = lottieData?.assets?.map((item, index) => {
+    if (item.id && item.u) {
+      item.u = `${lastPartStr}/images/`;
+    }
+    return item;
+  });
+  lottieData.assets = updatedZipAssets;
+  return lottieData;
+};
+
+/**
+ * åˆ›å»ºæ–‡ä»¶çš„ç›®å½•ç»“æ„
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @returns è¿”å›ä¸€ä¸ªåŒ…å«æ–‡ä»¶åå’Œå®Œæ•´è·¯å¾„çš„å¯¹è±¡ï¼Œå¦‚æœ URL æ ¼å¼æ— æ•ˆåˆ™è¿”å› undefined
+ */
+export const createFilesDir = function (url) {
+  const parts = url.split('/');
+  if (parts.length < 2) {
+    LogUtil.error(`Invalid URL format`);
+    return undefined;
+  }
+  // è·å–å€’æ•°ç¬¬äºŒéƒ¨åˆ†ï¼ˆç›®å½•åï¼‰
+  const directoryName = parts[parts.length - 2];
+  // è·å–æœ€åä¸€éƒ¨åˆ†ï¼ˆæ–‡ä»¶åï¼‰å¹¶ç§»é™¤æ‰©å±•å
+  const fileNameWithExtension = parts[parts.length - 1];
+  const fileName = fileNameWithExtension.replace(/\.(?:zip|json|lottie)$/i, '');
+  const basePath = `${getContext()?.filesDir || ''}/lottie/${directoryName}`;
+  const fullPath = `${basePath}/${fileName}`;
+  // åˆ›å»ºç›®å½•
+  mkdirSync(fullPath, true);
+  let result = {
+    dataName: fileNameWithExtension,
+    route: fullPath,
+  };
+  return result;
+};
+
+/**
+ * åˆ›å»ºç”¨äºåŠ è½½å›¾ç‰‡çš„ç›®å½•
+ * @returns è¿”å›åˆ›å»ºçš„å›¾ç‰‡ç›®å½•è·¯å¾„
+ */
+export const createImageFilesDir = function () {
+  let dirImgPath = `${getContext()?.filesDir}/lottie/loadImages`;
+  mkdirSync(dirImgPath, true);
+  return dirImgPath;
+};
+
+/**
+ * åˆå¹¶å¤šä¸ª ArrayBuffer å¯¹è±¡ä¸ºä¸€ä¸ªæ–°çš„ ArrayBuffer
+ *
+ * @param arrayBuffers - è¦åˆå¹¶çš„ ArrayBuffer æ•°ç»„
+ * @returns è¿”å›åˆå¹¶åçš„ ArrayBuffer
+ */
+export const combineArrayBuffers = function (arrayBuffers) {
+  // è®¡ç®—å¤šä¸ªArrayBufferçš„æ€»å­—èŠ‚å¤§å°
+  let totalByteLength = 0;
+  for (const arrayBuffer of arrayBuffers) {
+    totalByteLength += arrayBuffer.byteLength;
+  }
+  // åˆ›å»ºä¸€ä¸ªæ–°çš„ArrayBuffer
+  const combinedArrayBuffer = new ArrayBuffer(totalByteLength);
+  // åˆ›å»ºä¸€ä¸ªUint8Arrayæ¥æ“ä½œæ–°çš„ArrayBuffer
+  const combinedUint8Array = new Uint8Array(combinedArrayBuffer);
+  // ä¾æ¬¡å¤åˆ¶æ¯ä¸ªArrayBufferçš„å†…å®¹åˆ°æ–°çš„ArrayBufferä¸­
+  let offset = 0;
+  for (const arrayBuffer of arrayBuffers) {
+    const sourceUint8Array = new Uint8Array(arrayBuffer);
+    combinedUint8Array.set(sourceUint8Array, offset);
+    offset += sourceUint8Array.length;
+  }
+  return combinedArrayBuffer;
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„ URI æ˜¯å¦ä¸ºJSONæ–‡ä»¶
+ *
+ * @param uri - è¦æ£€æŸ¥çš„æ–‡ä»¶ URI
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤º URI æ˜¯å¦ä»¥ .json æˆ– .js ç»“å°¾
+ */
+export const isJsonFile = function (uri) {
+  return uri.endsWith('.json') || uri.endsWith('.js');
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„ URI æ˜¯å¦ä¸ºå‹ç¼©æ–‡ä»¶æˆ– Lottie åŠ¨ç”»æ–‡ä»¶
+ * @param uri - è¦æ£€æŸ¥çš„æ–‡ä»¶ URI
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤º URI æ˜¯å¦ä»¥ .zip æˆ– .lottie ç»“å°¾
+ */
+export const isCompressdFile = function (uri) {
+  return uri.endsWith('.zip') || uri.endsWith('.lottie');
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„èµ„æºæ•°ç»„ä¸­æ˜¯å¦å­˜åœ¨ç½‘ç»œèµ„æº
+ *
+ * @param assets - èµ„æºæ•°ç»„ï¼Œæ¯ä¸ªèµ„æºå¯¹è±¡åŒ…å«å±æ€§ p
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤ºèµ„æºæ•°ç»„ä¸­æ˜¯å¦å­˜åœ¨ä»¥ 'http' å¼€å¤´çš„ç½‘ç»œèµ„æº
+ */
+export const isExistNetworkAssets = function (assets) {
+  return assets?.some((item) => {
+    return item.p && item.p.startsWith('http');
+  });
+};
+Â•ÙR hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.file.fs.d.tsÙO hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.util.d.tsÙO hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.zlib.d.tsÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\FileUtil.jsÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’¯hasNamedExportsªisCommonJSÃÂÃÚ2Æ/*
+ * Copyright (C) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an 'AS IS' BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import fs from '@ohos.file.fs';
+import util from '@ohos.util';
+import zlib from '@ohos.zlib';
+import { moveFileSync, mkdirSync, listFileSync, readFileSync, isSandboxFileExist } from './FileUtil';
+import {LogUtil} from './LogUtil';
+
+/**
+ * è¿‡æ»¤å¹¶è¿”å›æŒ‡å®šç›®å½•ä¸‹çš„ JSON æ–‡ä»¶
+ *
+ * @param way - è¦æ‰«æçš„ç›®å½•è·¯å¾„
+ * @param isDotLottiePath - æ˜¯å¦ä¸º .lottie æ–‡ä»¶è·¯å¾„çš„æ ‡å¿—
+ * @returns è¿”å›æ‰¾åˆ°çš„ JSON æ–‡ä»¶åï¼Œå¦‚æœæ²¡æœ‰æ‰¾åˆ°åˆ™è¿”å› undefined
+ */
+const filterJson = function (way, isDotLottiePath) {
+  try {
+    // ä»¥åŒæ­¥æ–¹å¼åˆ—å‡ºæ–‡ä»¶å¤¹ä¸‹æ‰€æœ‰æ–‡ä»¶å
+    let files = listFileSync(way, ['.json']);
+    if (isDotLottiePath) {
+      return files.find(item => {
+        return item !== 'manifest.json' && item.endsWith('.json');
+      });
+    } else {
+      return files.find(item => item.endsWith('.json'));
+    }
+  } catch (err) {
+    LogUtil.error(`Method filterJson err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®šç›®å½•ä¸‹æ˜¯å¦å­˜åœ¨åŒ…å« JSON æ–‡ä»¶çš„å­ç›®å½•
+ *
+ * @param way - è¦æ‰«æçš„ç›®å½•è·¯å¾„
+ * @param isDotLottiePath - æ˜¯å¦ä¸º .lottie æ–‡ä»¶è·¯å¾„çš„æ ‡å¿—
+ * @returns è¿”å›æ‰¾åˆ°çš„åŒ…å« JSON æ–‡ä»¶çš„å­ç›®å½•åï¼Œå¦‚æœæ²¡æœ‰æ‰¾åˆ°åˆ™è¿”å› null
+ */
+const isHaveDirectory = function (way, isDotLottiePath) {
+  try {
+    // ä»¥åŒæ­¥æ–¹å¼åˆ—å‡ºæ–‡ä»¶å¤¹ä¸‹æ‰€æœ‰æ–‡ä»¶å
+    let files = listFileSync(way, ['.json']);
+    for (let i = 0; i < files.length; i++) {
+      let isDirectory = fs.statSync(`${way}/${files[i]}`).isDirectory();
+      if (isDirectory && files[i] !== '__MACOSX' && files[i] !== 'images') {
+        if (filterJson(`${way}/${files[i]}`, isDotLottiePath)) {
+          return files[i];
+        }
+      }
+    }
+  } catch (err) {
+    LogUtil.error(`Method isHaveDirectory err: ${JSON.stringify(err)}`);
+  }
+  return null;
+};
+
+/**
+ * å°†æŒ‡å®šç›®å½•ä¸‹çš„å›¾ç‰‡æ–‡ä»¶ç§»åŠ¨åˆ°ç›®æ ‡ç›®å½•çš„ images æ–‡ä»¶å¤¹ä¸­
+ *
+ * @param routerDir  - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @param way - ç›¸å¯¹è·¯å¾„ï¼Œç”¨äºæŒ‡å®šæºç›®å½•çš„ä½ç½®
+ */
+const moveImages = function (routerDir, way) {
+  try {
+    // filesåˆ›å»ºæ–°imagesæ–‡ä»¶å¤¹
+    let dirPath = `${routerDir}/images`;
+    mkdirSync(dirPath);
+    let newWay = `${routerDir}/${way}/images`;
+    let files = listFileSync(newWay, ['.png', '.jpg', '.jpeg']);
+    for (let i = 0; i < files.length; i++) {
+      let srcPath = `${newWay}/${files[i]}`;
+      let destPath = `${dirPath}/${files[i]}`;
+      moveFileSync(srcPath, destPath);
+    }
+  } catch (err) {
+    LogUtil.error(`Method moveImages err: ${JSON.stringify(err)}`);
+  }
+};
+
+/**
+ * å°†æŒ‡å®šç›®å½•ä¸‹çš„ JSON æ–‡ä»¶ç§»åŠ¨åˆ°ç›®æ ‡ç›®å½•ä¸­
+ *
+ * @param routerDir - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @param way - ç›¸å¯¹è·¯å¾„ï¼Œç”¨äºæŒ‡å®šæºç›®å½•çš„ä½ç½®
+ */
+const moveJson = function (routerDir, way) {
+  try {
+    let jsonWay = `${routerDir}/${way}`;
+    let jsonFile = listFileSync(jsonWay, ['.json']);
+    let newJson = jsonFile.find(item => item.endsWith('.json'));
+    let srcPath = `${jsonWay}/${newJson}`;
+    let destPath = `${routerDir}/${newJson}`;
+    moveFileSync(srcPath, destPath);
+  } catch (err) {
+    LogUtil.error(`Method moveJson err: ${JSON.stringify(err)}`);
+  }
+};
+
+/**
+ *  è§£å‹ç¼©å¹¶è¯»å– JSON æ–‡ä»¶
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param cacheDir - ç¼“å­˜ç›®å½•è·¯å¾„
+ * @param fileDir - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ª Promiseï¼Œè§£æä¸ºå¤„ç†åçš„ JSON æ•°æ®
+ */
+export const decompressAndReadJson = function (url, cacheDir, fileDir) {
+  const lastIndex = url.lastIndexOf('/');
+  const result = url.substring(lastIndex + 1);
+  let isDotLottiePath = url.endsWith('.lottie');
+  let inFile = `${cacheDir}/${result}`;
+  let outFile = fileDir;
+  let options = {
+    level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION,
+    memLevel: zlib.MemLevel.MEM_LEVEL_MAX,
+    strategy: zlib.CompressStrategy.COMPRESS_STRATEGY_DEFAULT_STRATEGY,
+  };
+  return new Promise((resolve, reject) => {
+    zlib.decompressFile(inFile, outFile, options).then((data) => {
+      // è§£å‹å®Œæˆä¹‹åè¯»å– json æ•°æ®
+      if (isHaveDirectory(fileDir, isDotLottiePath)) {
+        let newFileDir = isHaveDirectory(fileDir, isDotLottiePath);
+        moveImages(fileDir, newFileDir);
+        moveJson(fileDir, newFileDir);
+        let zipData = readJson(url, fileDir);
+        // ä¿®æ”¹uè·¯å¾„
+        let newZipData = handleZipAssets(zipData, fileDir);
+        resolve(newZipData);
+      } else {
+        let zipData = readJson(url, fileDir);
+        // ä¿®æ”¹uè·¯å¾„
+        let newZipData = handleZipAssets(zipData, fileDir);
+        resolve(newZipData);
+      }
+    }).catch((errData) => {
+      reject(errData);
+    });
+  });
+};
+
+/**
+ * è¯»å–å¹¶è§£æ JSON æ–‡ä»¶
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param readPath - è¯»å–è·¯å¾„
+ * @param errCallBack - é”™è¯¯å›è°ƒå‡½æ•°
+ * @returns è¿”å›è§£æåçš„ JSON å¯¹è±¡ï¼Œå¦‚æœæ²¡æœ‰è§£ææˆåŠŸåˆ™è¿”å› undefined
+ */
+export const readJson = function (url, readPath, errCallBack) {
+  try {
+    let textDecoderOptions = {
+      fatal: false,
+      ignoreBOM : true,
+    };
+    let resStr = util.TextDecoder.create('utf-8', textDecoderOptions);
+    let existResult = isCacheExist(url, readPath);
+    if (existResult?.isExist) {
+      let arrayBuffer = readFileSync(existResult.filePath);
+      // è§£ç çš„jsonæ•°æ®
+      let lottieStr = resStr.decodeToString(new Uint8Array(arrayBuffer));
+      return JSON.parse(lottieStr);
+    }
+    return undefined;
+  } catch (err) {
+    LogUtil.error(`Method readJson err: ${JSON.stringify(err)}`);
+    if (errCallBack) {
+      errCallBack('error', err);
+    }
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®š URL å¯¹åº”çš„æ–‡ä»¶æ˜¯å¦å­˜åœ¨äºç¼“å­˜ä¸­
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param readPath - è¯»å–è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ªåŒ…å«æ˜¯å¦å­˜åœ¨æ–‡ä»¶å’Œæ–‡ä»¶è·¯å¾„çš„å¯¹è±¡ï¼Œå¦‚æœå‡ºé”™åˆ™è¿”å› undefined
+ */
+export const isCacheExist = function (url, readPath) {
+  try {
+    const lastIndex = url.lastIndexOf('/');
+    const result = url.substring(lastIndex + 1); // æœ€åä¸€ä¸ªæ–œæ åçš„å­—ç¬¦ä¸²  `${readPath}/${filterJson(readPath, url.endsWith('.lottie'))}`
+    // é€šè¿‡æ²™ç®±ä¸­ä¸‹è½½æˆ–è€…è§£å‹çš„æ–‡ä»¶åæ¥æ‰¾åˆ°æ–‡ä»¶æ‰€åœ¨è·¯å¾„
+    let filePath = hasSuffix(url, ['.json', '.js']) ? `${readPath}/${result}` :
+      `${readPath}/${filterJson(readPath, url.endsWith('.lottie'))}`;
+    // åŒæ­¥æ–¹æ³•åˆ¤æ–­æ²™ç®±é‡Œçš„æ–‡ä»¶æ˜¯å¦å­˜åœ¨
+    let isExist = isSandboxFileExist(filePath);
+    return {
+      isExist,
+      filePath,
+    };
+  } catch (err) {
+    LogUtil.error(`Method isCacheExist err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®šè·¯å¾„ä¸‹æ˜¯å¦å­˜åœ¨å›¾ç‰‡æ–‡ä»¶
+ *
+ * @param way - ç›®æ ‡è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤ºæ˜¯å¦å­˜åœ¨å›¾ç‰‡æ–‡ä»¶ï¼Œå¦‚æœå‡ºé”™åˆ™è¿”å› undefined
+ */
+export const isHaveImg = function (way) {
+  try {
+    let imgFiles = listFileSync(way, ['.png', '.jpg', '.jpeg']);
+    return imgFiles.some(item => {
+      return item.endsWith('.png') || item.endsWith('.jpg') || item.endsWith('.jpeg');
+    });
+  } catch (err) {
+    LogUtil.error(`Method isCacheExist err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+
+/**
+ * æ£€æŸ¥URLæ˜¯å¦ä»¥æŒ‡å®šçš„åç¼€ç»“å°¾
+ *
+ * @param url - éœ€è¦æ£€æŸ¥çš„URLå­—ç¬¦ä¸²
+ * @param suffixes - å…è®¸çš„æ–‡ä»¶åç¼€æ•°ç»„ï¼ˆå¦‚['.json', '.js']ï¼‰
+ * @returns å¦‚æœURLä»¥æŒ‡å®šåç¼€ä¹‹ä¸€ç»“å°¾åˆ™è¿”å›trueï¼Œå¦åˆ™è¿”å›false
+ */
+const hasSuffix = function (url, suffixes) {
+  const lastDotIndex = url.lastIndexOf('.');
+  return lastDotIndex !== -1 && lastDotIndex < url.length - 1 && suffixes.includes(url.substring(lastDotIndex));
+};
+
+
+/**
+ * å¤„ç† Lottie åŠ¨ç”»æ•°æ®ä¸­çš„èµ„æºè·¯å¾„
+ *
+ * @param lottieData - Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ * @returns è¿”å›å¤„ç†åçš„ Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ */
+export const handleAssets = function (lottieData) {
+  let updatedAssets = lottieData?.assets?.map((item, index) => {
+    if (item.id && item.p && item.p.startsWith('http')) {
+      item.p = `${item.id}.png`;
+      if (!item.u) {
+        item.u = 'lottie/loadImages/';
+        item.e = 0;
+      }
+    }
+    return item;
+  });
+  lottieData.assets = updatedAssets;
+  return lottieData;
+};
+
+/**
+ * å¤„ç† ZIP å‹ç¼©åŒ…ä¸­çš„ Lottie åŠ¨ç”»èµ„æºè·¯å¾„
+ *
+ * @param lottieData - Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ * @param zipRoute - ZIP æ–‡ä»¶çš„è·¯å¾„
+ * @returns è¿”å›å¤„ç†åçš„ Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ */
+export const handleZipAssets = function (lottieData, zipRoute) {
+  const parts = zipRoute.split('/');
+  const lastPart = parts.slice(-3);
+  let lastPartStr = '';
+  if (Array.isArray(lastPart)) {
+    lastPartStr = lastPart.join('/');
+  }
+  // ä¿®æ”¹uè·¯å¾„
+  let updatedZipAssets = lottieData?.assets?.map((item, index) => {
+    if (item.id && item.u) {
+      item.u = `${lastPartStr}/images/`;
+    }
+    return item;
+  });
+  lottieData.assets = updatedZipAssets;
+  return lottieData;
+};
+
+/**
+ * åˆ›å»ºæ–‡ä»¶çš„ç›®å½•ç»“æ„
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @returns è¿”å›ä¸€ä¸ªåŒ…å«æ–‡ä»¶åå’Œå®Œæ•´è·¯å¾„çš„å¯¹è±¡ï¼Œå¦‚æœ URL æ ¼å¼æ— æ•ˆåˆ™è¿”å› undefined
+ */
+export const createFilesDir = function (url) {
+  const parts = url.split('/');
+  if (parts.length < 2) {
+    LogUtil.error(`Invalid URL format`);
+    return undefined;
+  }
+  // è·å–å€’æ•°ç¬¬äºŒéƒ¨åˆ†ï¼ˆç›®å½•åï¼‰
+  const directoryName = parts[parts.length - 2];
+  // è·å–æœ€åä¸€éƒ¨åˆ†ï¼ˆæ–‡ä»¶åï¼‰å¹¶ç§»é™¤æ‰©å±•å
+  const fileNameWithExtension = parts[parts.length - 1];
+  const fileName = fileNameWithExtension.replace(/\.(?:zip|json|lottie)$/i, '');
+  const basePath = `${getContext()?.filesDir || ''}/lottie/${directoryName}`;
+  const fullPath = `${basePath}/${fileName}`;
+  // åˆ›å»ºç›®å½•
+  mkdirSync(fullPath, true);
+  let result = {
+    dataName: fileNameWithExtension,
+    route: fullPath,
+  };
+  return result;
+};
+
+/**
+ * åˆ›å»ºç”¨äºåŠ è½½å›¾ç‰‡çš„ç›®å½•
+ * @returns è¿”å›åˆ›å»ºçš„å›¾ç‰‡ç›®å½•è·¯å¾„
+ */
+export const createImageFilesDir = function () {
+  let dirImgPath = `${getContext()?.filesDir}/lottie/loadImages`;
+  mkdirSync(dirImgPath, true);
+  return dirImgPath;
+};
+
+/**
+ * åˆå¹¶å¤šä¸ª ArrayBuffer å¯¹è±¡ä¸ºä¸€ä¸ªæ–°çš„ ArrayBuffer
+ *
+ * @param arrayBuffers - è¦åˆå¹¶çš„ ArrayBuffer æ•°ç»„
+ * @returns è¿”å›åˆå¹¶åçš„ ArrayBuffer
+ */
+export const combineArrayBuffers = function (arrayBuffers) {
+  // è®¡ç®—å¤šä¸ªArrayBufferçš„æ€»å­—èŠ‚å¤§å°
+  let totalByteLength = 0;
+  for (const arrayBuffer of arrayBuffers) {
+    totalByteLength += arrayBuffer.byteLength;
+  }
+  // åˆ›å»ºä¸€ä¸ªæ–°çš„ArrayBuffer
+  const combinedArrayBuffer = new ArrayBuffer(totalByteLength);
+  // åˆ›å»ºä¸€ä¸ªUint8Arrayæ¥æ“ä½œæ–°çš„ArrayBuffer
+  const combinedUint8Array = new Uint8Array(combinedArrayBuffer);
+  // ä¾æ¬¡å¤åˆ¶æ¯ä¸ªArrayBufferçš„å†…å®¹åˆ°æ–°çš„ArrayBufferä¸­
+  let offset = 0;
+  for (const arrayBuffer of arrayBuffers) {
+    const sourceUint8Array = new Uint8Array(arrayBuffer);
+    combinedUint8Array.set(sourceUint8Array, offset);
+    offset += sourceUint8Array.length;
+  }
+  return combinedArrayBuffer;
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„ URI æ˜¯å¦ä¸ºJSONæ–‡ä»¶
+ *
+ * @param uri - è¦æ£€æŸ¥çš„æ–‡ä»¶ URI
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤º URI æ˜¯å¦ä»¥ .json æˆ– .js ç»“å°¾
+ */
+export const isJsonFile = function (uri) {
+  return uri.endsWith('.json') || uri.endsWith('.js');
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„ URI æ˜¯å¦ä¸ºå‹ç¼©æ–‡ä»¶æˆ– Lottie åŠ¨ç”»æ–‡ä»¶
+ * @param uri - è¦æ£€æŸ¥çš„æ–‡ä»¶ URI
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤º URI æ˜¯å¦ä»¥ .zip æˆ– .lottie ç»“å°¾
+ */
+export const isCompressdFile = function (uri) {
+  return uri.endsWith('.zip') || uri.endsWith('.lottie');
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„èµ„æºæ•°ç»„ä¸­æ˜¯å¦å­˜åœ¨ç½‘ç»œèµ„æº
+ *
+ * @param assets - èµ„æºæ•°ç»„ï¼Œæ¯ä¸ªèµ„æºå¯¹è±¡åŒ…å«å±æ€§ p
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤ºèµ„æºæ•°ç»„ä¸­æ˜¯å¦å­˜åœ¨ä»¥ 'http' å¼€å¤´çš„ç½‘ç»œèµ„æº
+ */
+export const isExistNetworkAssets = function (assets) {
+  return assets?.some((item) => {
+    return item.p && item.p.startsWith('http');
+  });
+};
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ€‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ì ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌĞ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  Ìİ ‘”  ÌŞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìğ ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìı ‘”  Ìş ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘Ù“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\DataUtil.js‘Ú2Æ/*
+ * Copyright (C) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an 'AS IS' BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import fs from '@ohos.file.fs';
+import util from '@ohos.util';
+import zlib from '@ohos.zlib';
+import { moveFileSync, mkdirSync, listFileSync, readFileSync, isSandboxFileExist } from './FileUtil';
+import {LogUtil} from './LogUtil';
+
+/**
+ * è¿‡æ»¤å¹¶è¿”å›æŒ‡å®šç›®å½•ä¸‹çš„ JSON æ–‡ä»¶
+ *
+ * @param way - è¦æ‰«æçš„ç›®å½•è·¯å¾„
+ * @param isDotLottiePath - æ˜¯å¦ä¸º .lottie æ–‡ä»¶è·¯å¾„çš„æ ‡å¿—
+ * @returns è¿”å›æ‰¾åˆ°çš„ JSON æ–‡ä»¶åï¼Œå¦‚æœæ²¡æœ‰æ‰¾åˆ°åˆ™è¿”å› undefined
+ */
+const filterJson = function (way, isDotLottiePath) {
+  try {
+    // ä»¥åŒæ­¥æ–¹å¼åˆ—å‡ºæ–‡ä»¶å¤¹ä¸‹æ‰€æœ‰æ–‡ä»¶å
+    let files = listFileSync(way, ['.json']);
+    if (isDotLottiePath) {
+      return files.find(item => {
+        return item !== 'manifest.json' && item.endsWith('.json');
+      });
+    } else {
+      return files.find(item => item.endsWith('.json'));
+    }
+  } catch (err) {
+    LogUtil.error(`Method filterJson err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®šç›®å½•ä¸‹æ˜¯å¦å­˜åœ¨åŒ…å« JSON æ–‡ä»¶çš„å­ç›®å½•
+ *
+ * @param way - è¦æ‰«æçš„ç›®å½•è·¯å¾„
+ * @param isDotLottiePath - æ˜¯å¦ä¸º .lottie æ–‡ä»¶è·¯å¾„çš„æ ‡å¿—
+ * @returns è¿”å›æ‰¾åˆ°çš„åŒ…å« JSON æ–‡ä»¶çš„å­ç›®å½•åï¼Œå¦‚æœæ²¡æœ‰æ‰¾åˆ°åˆ™è¿”å› null
+ */
+const isHaveDirectory = function (way, isDotLottiePath) {
+  try {
+    // ä»¥åŒæ­¥æ–¹å¼åˆ—å‡ºæ–‡ä»¶å¤¹ä¸‹æ‰€æœ‰æ–‡ä»¶å
+    let files = listFileSync(way, ['.json']);
+    for (let i = 0; i < files.length; i++) {
+      let isDirectory = fs.statSync(`${way}/${files[i]}`).isDirectory();
+      if (isDirectory && files[i] !== '__MACOSX' && files[i] !== 'images') {
+        if (filterJson(`${way}/${files[i]}`, isDotLottiePath)) {
+          return files[i];
+        }
+      }
+    }
+  } catch (err) {
+    LogUtil.error(`Method isHaveDirectory err: ${JSON.stringify(err)}`);
+  }
+  return null;
+};
+
+/**
+ * å°†æŒ‡å®šç›®å½•ä¸‹çš„å›¾ç‰‡æ–‡ä»¶ç§»åŠ¨åˆ°ç›®æ ‡ç›®å½•çš„ images æ–‡ä»¶å¤¹ä¸­
+ *
+ * @param routerDir  - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @param way - ç›¸å¯¹è·¯å¾„ï¼Œç”¨äºæŒ‡å®šæºç›®å½•çš„ä½ç½®
+ */
+const moveImages = function (routerDir, way) {
+  try {
+    // filesåˆ›å»ºæ–°imagesæ–‡ä»¶å¤¹
+    let dirPath = `${routerDir}/images`;
+    mkdirSync(dirPath);
+    let newWay = `${routerDir}/${way}/images`;
+    let files = listFileSync(newWay, ['.png', '.jpg', '.jpeg']);
+    for (let i = 0; i < files.length; i++) {
+      let srcPath = `${newWay}/${files[i]}`;
+      let destPath = `${dirPath}/${files[i]}`;
+      moveFileSync(srcPath, destPath);
+    }
+  } catch (err) {
+    LogUtil.error(`Method moveImages err: ${JSON.stringify(err)}`);
+  }
+};
+
+/**
+ * å°†æŒ‡å®šç›®å½•ä¸‹çš„ JSON æ–‡ä»¶ç§»åŠ¨åˆ°ç›®æ ‡ç›®å½•ä¸­
+ *
+ * @param routerDir - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @param way - ç›¸å¯¹è·¯å¾„ï¼Œç”¨äºæŒ‡å®šæºç›®å½•çš„ä½ç½®
+ */
+const moveJson = function (routerDir, way) {
+  try {
+    let jsonWay = `${routerDir}/${way}`;
+    let jsonFile = listFileSync(jsonWay, ['.json']);
+    let newJson = jsonFile.find(item => item.endsWith('.json'));
+    let srcPath = `${jsonWay}/${newJson}`;
+    let destPath = `${routerDir}/${newJson}`;
+    moveFileSync(srcPath, destPath);
+  } catch (err) {
+    LogUtil.error(`Method moveJson err: ${JSON.stringify(err)}`);
+  }
+};
+
+/**
+ *  è§£å‹ç¼©å¹¶è¯»å– JSON æ–‡ä»¶
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param cacheDir - ç¼“å­˜ç›®å½•è·¯å¾„
+ * @param fileDir - ç›®æ ‡ç›®å½•è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ª Promiseï¼Œè§£æä¸ºå¤„ç†åçš„ JSON æ•°æ®
+ */
+export const decompressAndReadJson = function (url, cacheDir, fileDir) {
+  const lastIndex = url.lastIndexOf('/');
+  const result = url.substring(lastIndex + 1);
+  let isDotLottiePath = url.endsWith('.lottie');
+  let inFile = `${cacheDir}/${result}`;
+  let outFile = fileDir;
+  let options = {
+    level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION,
+    memLevel: zlib.MemLevel.MEM_LEVEL_MAX,
+    strategy: zlib.CompressStrategy.COMPRESS_STRATEGY_DEFAULT_STRATEGY,
+  };
+  return new Promise((resolve, reject) => {
+    zlib.decompressFile(inFile, outFile, options).then((data) => {
+      // è§£å‹å®Œæˆä¹‹åè¯»å– json æ•°æ®
+      if (isHaveDirectory(fileDir, isDotLottiePath)) {
+        let newFileDir = isHaveDirectory(fileDir, isDotLottiePath);
+        moveImages(fileDir, newFileDir);
+        moveJson(fileDir, newFileDir);
+        let zipData = readJson(url, fileDir);
+        // ä¿®æ”¹uè·¯å¾„
+        let newZipData = handleZipAssets(zipData, fileDir);
+        resolve(newZipData);
+      } else {
+        let zipData = readJson(url, fileDir);
+        // ä¿®æ”¹uè·¯å¾„
+        let newZipData = handleZipAssets(zipData, fileDir);
+        resolve(newZipData);
+      }
+    }).catch((errData) => {
+      reject(errData);
+    });
+  });
+};
+
+/**
+ * è¯»å–å¹¶è§£æ JSON æ–‡ä»¶
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param readPath - è¯»å–è·¯å¾„
+ * @param errCallBack - é”™è¯¯å›è°ƒå‡½æ•°
+ * @returns è¿”å›è§£æåçš„ JSON å¯¹è±¡ï¼Œå¦‚æœæ²¡æœ‰è§£ææˆåŠŸåˆ™è¿”å› undefined
+ */
+export const readJson = function (url, readPath, errCallBack) {
+  try {
+    let textDecoderOptions = {
+      fatal: false,
+      ignoreBOM : true,
+    };
+    let resStr = util.TextDecoder.create('utf-8', textDecoderOptions);
+    let existResult = isCacheExist(url, readPath);
+    if (existResult?.isExist) {
+      let arrayBuffer = readFileSync(existResult.filePath);
+      // è§£ç çš„jsonæ•°æ®
+      let lottieStr = resStr.decodeToString(new Uint8Array(arrayBuffer));
+      return JSON.parse(lottieStr);
+    }
+    return undefined;
+  } catch (err) {
+    LogUtil.error(`Method readJson err: ${JSON.stringify(err)}`);
+    if (errCallBack) {
+      errCallBack('error', err);
+    }
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®š URL å¯¹åº”çš„æ–‡ä»¶æ˜¯å¦å­˜åœ¨äºç¼“å­˜ä¸­
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @param readPath - è¯»å–è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ªåŒ…å«æ˜¯å¦å­˜åœ¨æ–‡ä»¶å’Œæ–‡ä»¶è·¯å¾„çš„å¯¹è±¡ï¼Œå¦‚æœå‡ºé”™åˆ™è¿”å› undefined
+ */
+export const isCacheExist = function (url, readPath) {
+  try {
+    const lastIndex = url.lastIndexOf('/');
+    const result = url.substring(lastIndex + 1); // æœ€åä¸€ä¸ªæ–œæ åçš„å­—ç¬¦ä¸²  `${readPath}/${filterJson(readPath, url.endsWith('.lottie'))}`
+    // é€šè¿‡æ²™ç®±ä¸­ä¸‹è½½æˆ–è€…è§£å‹çš„æ–‡ä»¶åæ¥æ‰¾åˆ°æ–‡ä»¶æ‰€åœ¨è·¯å¾„
+    let filePath = hasSuffix(url, ['.json', '.js']) ? `${readPath}/${result}` :
+      `${readPath}/${filterJson(readPath, url.endsWith('.lottie'))}`;
+    // åŒæ­¥æ–¹æ³•åˆ¤æ–­æ²™ç®±é‡Œçš„æ–‡ä»¶æ˜¯å¦å­˜åœ¨
+    let isExist = isSandboxFileExist(filePath);
+    return {
+      isExist,
+      filePath,
+    };
+  } catch (err) {
+    LogUtil.error(`Method isCacheExist err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+/**
+ * æ£€æŸ¥æŒ‡å®šè·¯å¾„ä¸‹æ˜¯å¦å­˜åœ¨å›¾ç‰‡æ–‡ä»¶
+ *
+ * @param way - ç›®æ ‡è·¯å¾„
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤ºæ˜¯å¦å­˜åœ¨å›¾ç‰‡æ–‡ä»¶ï¼Œå¦‚æœå‡ºé”™åˆ™è¿”å› undefined
+ */
+export const isHaveImg = function (way) {
+  try {
+    let imgFiles = listFileSync(way, ['.png', '.jpg', '.jpeg']);
+    return imgFiles.some(item => {
+      return item.endsWith('.png') || item.endsWith('.jpg') || item.endsWith('.jpeg');
+    });
+  } catch (err) {
+    LogUtil.error(`Method isCacheExist err: ${JSON.stringify(err)}`);
+    return undefined;
+  }
+};
+
+
+/**
+ * æ£€æŸ¥URLæ˜¯å¦ä»¥æŒ‡å®šçš„åç¼€ç»“å°¾
+ *
+ * @param url - éœ€è¦æ£€æŸ¥çš„URLå­—ç¬¦ä¸²
+ * @param suffixes - å…è®¸çš„æ–‡ä»¶åç¼€æ•°ç»„ï¼ˆå¦‚['.json', '.js']ï¼‰
+ * @returns å¦‚æœURLä»¥æŒ‡å®šåç¼€ä¹‹ä¸€ç»“å°¾åˆ™è¿”å›trueï¼Œå¦åˆ™è¿”å›false
+ */
+const hasSuffix = function (url, suffixes) {
+  const lastDotIndex = url.lastIndexOf('.');
+  return lastDotIndex !== -1 && lastDotIndex < url.length - 1 && suffixes.includes(url.substring(lastDotIndex));
+};
+
+
+/**
+ * å¤„ç† Lottie åŠ¨ç”»æ•°æ®ä¸­çš„èµ„æºè·¯å¾„
+ *
+ * @param lottieData - Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ * @returns è¿”å›å¤„ç†åçš„ Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ */
+export const handleAssets = function (lottieData) {
+  let updatedAssets = lottieData?.assets?.map((item, index) => {
+    if (item.id && item.p && item.p.startsWith('http')) {
+      item.p = `${item.id}.png`;
+      if (!item.u) {
+        item.u = 'lottie/loadImages/';
+        item.e = 0;
+      }
+    }
+    return item;
+  });
+  lottieData.assets = updatedAssets;
+  return lottieData;
+};
+
+/**
+ * å¤„ç† ZIP å‹ç¼©åŒ…ä¸­çš„ Lottie åŠ¨ç”»èµ„æºè·¯å¾„
+ *
+ * @param lottieData - Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ * @param zipRoute - ZIP æ–‡ä»¶çš„è·¯å¾„
+ * @returns è¿”å›å¤„ç†åçš„ Lottie åŠ¨ç”»æ•°æ®å¯¹è±¡
+ */
+export const handleZipAssets = function (lottieData, zipRoute) {
+  const parts = zipRoute.split('/');
+  const lastPart = parts.slice(-3);
+  let lastPartStr = '';
+  if (Array.isArray(lastPart)) {
+    lastPartStr = lastPart.join('/');
+  }
+  // ä¿®æ”¹uè·¯å¾„
+  let updatedZipAssets = lottieData?.assets?.map((item, index) => {
+    if (item.id && item.u) {
+      item.u = `${lastPartStr}/images/`;
+    }
+    return item;
+  });
+  lottieData.assets = updatedZipAssets;
+  return lottieData;
+};
+
+/**
+ * åˆ›å»ºæ–‡ä»¶çš„ç›®å½•ç»“æ„
+ *
+ * @param url - æ–‡ä»¶çš„ URL åœ°å€
+ * @returns è¿”å›ä¸€ä¸ªåŒ…å«æ–‡ä»¶åå’Œå®Œæ•´è·¯å¾„çš„å¯¹è±¡ï¼Œå¦‚æœ URL æ ¼å¼æ— æ•ˆåˆ™è¿”å› undefined
+ */
+export const createFilesDir = function (url) {
+  const parts = url.split('/');
+  if (parts.length < 2) {
+    LogUtil.error(`Invalid URL format`);
+    return undefined;
+  }
+  // è·å–å€’æ•°ç¬¬äºŒéƒ¨åˆ†ï¼ˆç›®å½•åï¼‰
+  const directoryName = parts[parts.length - 2];
+  // è·å–æœ€åä¸€éƒ¨åˆ†ï¼ˆæ–‡ä»¶åï¼‰å¹¶ç§»é™¤æ‰©å±•å
+  const fileNameWithExtension = parts[parts.length - 1];
+  const fileName = fileNameWithExtension.replace(/\.(?:zip|json|lottie)$/i, '');
+  const basePath = `${getContext()?.filesDir || ''}/lottie/${directoryName}`;
+  const fullPath = `${basePath}/${fileName}`;
+  // åˆ›å»ºç›®å½•
+  mkdirSync(fullPath, true);
+  let result = {
+    dataName: fileNameWithExtension,
+    route: fullPath,
+  };
+  return result;
+};
+
+/**
+ * åˆ›å»ºç”¨äºåŠ è½½å›¾ç‰‡çš„ç›®å½•
+ * @returns è¿”å›åˆ›å»ºçš„å›¾ç‰‡ç›®å½•è·¯å¾„
+ */
+export const createImageFilesDir = function () {
+  let dirImgPath = `${getContext()?.filesDir}/lottie/loadImages`;
+  mkdirSync(dirImgPath, true);
+  return dirImgPath;
+};
+
+/**
+ * åˆå¹¶å¤šä¸ª ArrayBuffer å¯¹è±¡ä¸ºä¸€ä¸ªæ–°çš„ ArrayBuffer
+ *
+ * @param arrayBuffers - è¦åˆå¹¶çš„ ArrayBuffer æ•°ç»„
+ * @returns è¿”å›åˆå¹¶åçš„ ArrayBuffer
+ */
+export const combineArrayBuffers = function (arrayBuffers) {
+  // è®¡ç®—å¤šä¸ªArrayBufferçš„æ€»å­—èŠ‚å¤§å°
+  let totalByteLength = 0;
+  for (const arrayBuffer of arrayBuffers) {
+    totalByteLength += arrayBuffer.byteLength;
+  }
+  // åˆ›å»ºä¸€ä¸ªæ–°çš„ArrayBuffer
+  const combinedArrayBuffer = new ArrayBuffer(totalByteLength);
+  // åˆ›å»ºä¸€ä¸ªUint8Arrayæ¥æ“ä½œæ–°çš„ArrayBuffer
+  const combinedUint8Array = new Uint8Array(combinedArrayBuffer);
+  // ä¾æ¬¡å¤åˆ¶æ¯ä¸ªArrayBufferçš„å†…å®¹åˆ°æ–°çš„ArrayBufferä¸­
+  let offset = 0;
+  for (const arrayBuffer of arrayBuffers) {
+    const sourceUint8Array = new Uint8Array(arrayBuffer);
+    combinedUint8Array.set(sourceUint8Array, offset);
+    offset += sourceUint8Array.length;
+  }
+  return combinedArrayBuffer;
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„ URI æ˜¯å¦ä¸ºJSONæ–‡ä»¶
+ *
+ * @param uri - è¦æ£€æŸ¥çš„æ–‡ä»¶ URI
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤º URI æ˜¯å¦ä»¥ .json æˆ– .js ç»“å°¾
+ */
+export const isJsonFile = function (uri) {
+  return uri.endsWith('.json') || uri.endsWith('.js');
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„ URI æ˜¯å¦ä¸ºå‹ç¼©æ–‡ä»¶æˆ– Lottie åŠ¨ç”»æ–‡ä»¶
+ * @param uri - è¦æ£€æŸ¥çš„æ–‡ä»¶ URI
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤º URI æ˜¯å¦ä»¥ .zip æˆ– .lottie ç»“å°¾
+ */
+export const isCompressdFile = function (uri) {
+  return uri.endsWith('.zip') || uri.endsWith('.lottie');
+};
+
+/**
+ * æ£€æŸ¥ç»™å®šçš„èµ„æºæ•°ç»„ä¸­æ˜¯å¦å­˜åœ¨ç½‘ç»œèµ„æº
+ *
+ * @param assets - èµ„æºæ•°ç»„ï¼Œæ¯ä¸ªèµ„æºå¯¹è±¡åŒ…å«å±æ€§ p
+ * @returns è¿”å›ä¸€ä¸ªå¸ƒå°”å€¼ï¼Œè¡¨ç¤ºèµ„æºæ•°ç»„ä¸­æ˜¯å¦å­˜åœ¨ä»¥ 'http' å¼€å¤´çš„ç½‘ç»œèµ„æº
+ */
+export const isExistNetworkAssets = function (assets) {
+  return assets?.some((item) => {
+    return item.p && item.p.startsWith('http');
+  });
+};
+ÔrF•­@ohos.file.fsª@ohos.utilª@ohos.zlibª./FileUtil©./LogUtilÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÃÙR hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.file.fs.d.tsAÃªoh-resolveÂGAÃÙO hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.util.d.tsAÃªoh-resolveÂGAÃÙO hvigor_ignore_D:_DevEco Studio_sdk_default_openharmony_ets_api_@ohos.zlib.d.tsAÃªoh-resolveÂGAÂÙ“D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\FileUtil.jsAÃªoh-resolveÂGAÂÙ’D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\LogUtil.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCacheœÔrJ–¤type¥start£end«declarationªspecifiers¦source¶ExportNamedDeclarationÍ#ÍÔrK•¤type¥start£end¬declarations¤kind³VariableDeclarationÍ*Í‘ÔrL•¤type¥start£end¢id¤init²VariableDeclaratorÍ0Í ÔrM”¤type¥start£end¤nameªIdentifierÍ0ÍEµdecompressAndReadJsonÔrN™¤type¥start£end¢idªexpression©generator¥async¦params¤body²FunctionExpressionÍHÍ ÀÂÂÂ“MªIdentifierÍRÍU£urlMªIdentifierÍWÍ_¨cacheDirMªIdentifierÍaÍh§fileDirÔrO”¤type¥start£end¤body®BlockStatementÍjÍ —K³VariableDeclarationÍoÍ–‘L²VariableDeclaratorÍuÍ•MªIdentifierÍuÍ~©lastIndexÔrP–¤type¥start£end¦callee©arguments¨optional®CallExpressionÍÍ•ÔrQ—¤type¥start£end¦object¨property¨computed¨optional°MemberExpressionÍÍMªIdentifierÍÍ„£urlMªIdentifierÍ…Í«lastIndexOfÂÂ‘ÔrR•¤type¥start£end¥value£raw§LiteralÍ‘Í”¡/£'/'Â¥constK³VariableDeclarationÍšÍÆ‘L²VariableDeclaratorÍ ÍÅMªIdentifierÍ Í¦¦resultP®CallExpressionÍ©ÍÅQ°MemberExpressionÍ©Í¶MªIdentifierÍ©Í¬£urlMªIdentifierÍ­Í¶©substringÂÂ‘ÔrS–¤type¥start£end¤left¨operator¥right°BinaryExpressionÍ·ÍÄMªIdentifierÍ·ÍÀ©lastIndex¡+R§LiteralÍÃÍÄ¡1Â¥constK³VariableDeclarationÍÊÍø‘L²VariableDeclaratorÍÎÍ÷MªIdentifierÍÎÍİ¯isDotLottiePathP®CallExpressionÍàÍ÷Q°MemberExpressionÍàÍìMªIdentifierÍàÍã£urlMªIdentifierÍäÍì¨endsWithÂÂ‘R§LiteralÍíÍö§.lottie©'.lottie'Â£letK³VariableDeclarationÍüÍ!‘L²VariableDeclaratorÍ Í MªIdentifierÍ Í¦inFileÔrT•¤type¥start£end«expressions¦quasis¯TemplateLiteralÍ	Í ’MªIdentifierÍÍ¨cacheDirMªIdentifierÍÍ¦result“ÔrU•¤type¥start£end¥value¤tail¯TemplateElementÍ
+Í
+ÔrV’£raw¦cooked  ÂU¯TemplateElementÍÍV¡/¡/ÂU¯TemplateElementÍÍV  Ã£letK³VariableDeclarationÍ%Í;‘L²VariableDeclaratorÍ)Í:MªIdentifierÍ)Í0§outFileMªIdentifierÍ3Í:§fileDir£letK³VariableDeclarationÍ?Í‘L²VariableDeclaratorÍCÍMªIdentifierÍCÍJ§optionsÔrW”¤type¥start£endªproperties°ObjectExpressionÍMÍ“ÔrX™¤type¥start£end¦method©shorthand¨computed£key¥value¤kind¨PropertyÍTÍÂÂÂMªIdentifierÍTÍY¥levelQ°MemberExpressionÍ[ÍQ°MemberExpressionÍ[ÍmMªIdentifierÍ[Í_¤zlibMªIdentifierÍ`Ím­CompressLevelÂÂMªIdentifierÍnÍÙ"COMPRESS_LEVEL_DEFAULT_COMPRESSIONÂÂ¤initX¨PropertyÍ—Í¼ÂÂÂMªIdentifierÍ—ÍŸ¨memLevelQ°MemberExpressionÍ¡Í¼Q°MemberExpressionÍ¡Í®MªIdentifierÍ¡Í¥¤zlibMªIdentifierÍ¦Í®¨MemLevelÂÂMªIdentifierÍ¯Í¼­MEM_LEVEL_MAXÂÂ¤initX¨PropertyÍÃÍÂÂÂMªIdentifierÍÃÍË¨strategyQ°MemberExpressionÍÍÍQ°MemberExpressionÍÍÍâMªIdentifierÍÍÍÑ¤zlibMªIdentifierÍÒÍâ°CompressStrategyÂÂMªIdentifierÍãÍÙ"COMPRESS_STRATEGY_DEFAULT_STRATEGYÂÂ¤init£letÔrY”¤type¥start£end¨argument¯ReturnStatementÍÍıÔrZ•¤type¥start£end¦callee©arguments­NewExpressionÍÍüMªIdentifierÍÍ"§Promise‘N·ArrowFunctionExpressionÍ#ÍûÀÂÂÂ’MªIdentifierÍ$Í+§resolveMªIdentifierÍ-Í3¦rejectO®BlockStatementÍ8Íû‘Ôr[”¤type¥start£endªexpression³ExpressionStatementÍ?ÍöP®CallExpressionÍ?ÍõQ°MemberExpressionÍ?ÍÆP®CallExpressionÍ?ÍÀQ°MemberExpressionÍ?ÍqP®CallExpressionÍ?ÍlQ°MemberExpressionÍ?ÍRMªIdentifierÍ?ÍC¤zlibMªIdentifierÍDÍR®decompressFileÂÂ“MªIdentifierÍSÍY¦inFileMªIdentifierÍ[Íb§outFileMªIdentifierÍdÍk§optionsÂMªIdentifierÍmÍq¤thenÂÂ‘N·ArrowFunctionExpressionÍrÍ¿ÀÂÂÂ‘MªIdentifierÍsÍw¤dataO®BlockStatementÍ|Í¿‘Ôr\–¤type¥start£end¤testªconsequent©alternate«IfStatementÍ Í¸P®CallExpressionÍ¤ÍÍMªIdentifierÍ¤Í³¯isHaveDirectory’MªIdentifierÍ´Í»§fileDirMªIdentifierÍ½ÍÌ¯isDotLottiePathÂO®BlockStatementÍÏÍ–K³VariableDeclarationÍÚÍ‘L²VariableDeclaratorÍŞÍMªIdentifierÍŞÍèªnewFileDirP®CallExpressionÍëÍMªIdentifierÍëÍú¯isHaveDirectory’MªIdentifierÍûÍ§fileDirMªIdentifierÍÍ¯isDotLottiePathÂ£let[³ExpressionStatementÍÍ?P®CallExpressionÍÍ>MªIdentifierÍÍ)ªmoveImages’MªIdentifierÍ*Í1§fileDirMªIdentifierÍ3Í=ªnewFileDirÂ[³ExpressionStatementÍIÍgP®CallExpressionÍIÍfMªIdentifierÍIÍQ¨moveJson’MªIdentifierÍRÍY§fileDirMªIdentifierÍ[ÍeªnewFileDirÂK³VariableDeclarationÍqÍ–‘L²VariableDeclaratorÍuÍ•MªIdentifierÍuÍ|§zipDataP®CallExpressionÍÍ•MªIdentifierÍÍ‡¨readJson’MªIdentifierÍˆÍ‹£urlMªIdentifierÍÍ”§fileDirÂ£letK³VariableDeclarationÍ²Íå‘L²VariableDeclaratorÍ¶ÍäMªIdentifierÍ¶ÍÀªnewZipDataP®CallExpressionÍÃÍäMªIdentifierÍÃÍÒ¯handleZipAssets’MªIdentifierÍÓÍÚ§zipDataMªIdentifierÍÜÍã§fileDirÂ£let[³ExpressionStatementÍïÍP®CallExpressionÍïÍMªIdentifierÍïÍö§resolve‘MªIdentifierÍ÷ÍªnewZipDataÂO®BlockStatementÍÍ¸“K³VariableDeclarationÍÍB‘L²VariableDeclaratorÍ!ÍAMªIdentifierÍ!Í(§zipDataP®CallExpressionÍ+ÍAMªIdentifierÍ+Í3¨readJson’MªIdentifierÍ4Í7£urlMªIdentifierÍ9Í@§fileDirÂ£letK³VariableDeclarationÍ^Í‘‘L²VariableDeclaratorÍbÍMªIdentifierÍbÍlªnewZipDataP®CallExpressionÍoÍMªIdentifierÍoÍ~¯handleZipAssets’MªIdentifierÍÍ†§zipDataMªIdentifierÍˆÍ§fileDirÂ£let[³ExpressionStatementÍ›Í¯P®CallExpressionÍ›Í®MªIdentifierÍ›Í¢§resolve‘MªIdentifierÍ£Í­ªnewZipDataÂÂMªIdentifierÍÁÍÆ¥catchÂÂ‘N·ArrowFunctionExpressionÍÇÍôÀÂÂÂ‘MªIdentifierÍÈÍÏ§errDataO®BlockStatementÍÔÍô‘[³ExpressionStatementÍİÍíP®CallExpressionÍİÍìMªIdentifierÍİÍã¦reject‘MªIdentifierÍäÍë§errDataÂÂ¥constÀJ¶ExportNamedDeclarationÍ®ÍK³VariableDeclarationÍµÍ‘L²VariableDeclaratorÍ»Í~MªIdentifierÍ»ÍÃ¨readJsonN²FunctionExpressionÍÆÍ~ÀÂÂÂ“MªIdentifierÍĞÍÓ£urlMªIdentifierÍÕÍİ¨readPathMªIdentifierÍßÍê«errCallBackO®BlockStatementÍìÍ~‘Ôr]–¤type¥start£end¥block§handler©finalizer¬TryStatementÍñÍ{O®BlockStatementÍõÍÍ•K³VariableDeclarationÍüÍL‘L²VariableDeclaratorÍ ÍKMªIdentifierÍ Í²textDecoderOptionsW°ObjectExpressionÍÍK’X¨PropertyÍÍ*ÂÂÂMªIdentifierÍÍ#¥fatalR§LiteralÍ%Í*Â¥false¤initX¨PropertyÍ3ÍCÂÂÂMªIdentifierÍ3Í<©ignoreBOMR§LiteralÍ?ÍCÃ¤true¤init£letK³VariableDeclarationÍRÍ”‘L²VariableDeclaratorÍVÍ“MªIdentifierÍVÍ\¦resStrP®CallExpressionÍ_Í“Q°MemberExpressionÍ_ÍvQ°MemberExpressionÍ_ÍoMªIdentifierÍ_Íc¤utilMªIdentifierÍdÍo«TextDecoderÂÂMªIdentifierÍpÍv¦createÂÂ’R§LiteralÍwÍ~¥utf-8§'utf-8'MªIdentifierÍ€Í’²textDecoderOptionsÂ£letK³VariableDeclarationÍšÍÈ‘L²VariableDeclaratorÍÍÇMªIdentifierÍÍ©«existResultP®CallExpressionÍ¬ÍÇMªIdentifierÍ¬Í¸¬isCacheExist’MªIdentifierÍ¹Í¼£urlMªIdentifierÍ¾ÍÆ¨readPathÂ£let\«IfStatementÍÎÍ±[¯ChainExpressionÍÒÍæQ°MemberExpressionÍÒÍæMªIdentifierÍÒÍİ«existResultMªIdentifierÍßÍæ§isExistÂÃO®BlockStatementÍèÍ±“K³VariableDeclarationÍñÍ&‘L²VariableDeclaratorÍõÍ%MªIdentifierÍõÍ «arrayBufferP®CallExpressionÍÍ%MªIdentifierÍÍ¬readFileSync‘Q°MemberExpressionÍÍ$MªIdentifierÍÍ«existResultMªIdentifierÍÍ$¨filePathÂÂÂ£letK³VariableDeclarationÍBÍ…‘L²VariableDeclaratorÍFÍ„MªIdentifierÍFÍO©lottieStrP®CallExpressionÍRÍ„Q°MemberExpressionÍRÍgMªIdentifierÍRÍX¦resStrMªIdentifierÍYÍg®decodeToStringÂÂ‘Z­NewExpressionÍhÍƒMªIdentifierÍlÍvªUint8Array‘MªIdentifierÍwÍ‚«arrayBufferÂ£letY¯ReturnStatementÍÍªP®CallExpressionÍ”Í©Q°MemberExpressionÍ”ÍMªIdentifierÍ”Í˜¤JSONMªIdentifierÍ™Í¥parseÂÂ‘MªIdentifierÍŸÍ¨©lottieStrÂÀY¯ReturnStatementÍ·ÍÈMªIdentifierÍ¾ÍÇ©undefinedÔr^•¤type¥start£end¥param¤body«CatchClauseÍÎÍ{MªIdentifierÍÕÍØ£errO®BlockStatementÍÚÍ{“[³ExpressionStatementÍáÍP®CallExpressionÍáÍQ°MemberExpressionÍáÍîMªIdentifierÍáÍè§LogUtilMªIdentifierÍéÍî¥errorÂÂ‘T¯TemplateLiteralÍïÍ‘P®CallExpressionÍÍQ°MemberExpressionÍÍMªIdentifierÍÍ¤JSONMªIdentifierÍÍ©stringifyÂÂ‘MªIdentifierÍÍ£errÂ’U¯TemplateElementÍğÍVµMethod readJson err: µMethod readJson err: ÂU¯TemplateElementÍÍV  ÃÂ\«IfStatementÍ$Í_MªIdentifierÍ(Í3«errCallBackO®BlockStatementÍ5Í_‘[³ExpressionStatementÍ>ÍXP®CallExpressionÍ>ÍWMªIdentifierÍ>ÍI«errCallBack’R§LiteralÍJÍQ¥error§'error'MªIdentifierÍSÍV£errÂÀY¯ReturnStatementÍeÍvMªIdentifierÍlÍu©undefinedÀ¥constÀJ¶ExportNamedDeclarationÍÍ¸K³VariableDeclarationÍÍ¸‘L²VariableDeclaratorÍ$Í·MªIdentifierÍ$Í0¬isCacheExistN²FunctionExpressionÍ3Í·ÀÂÂÂ’MªIdentifierÍ=Í@£urlMªIdentifierÍBÍJ¨readPathO®BlockStatementÍLÍ·‘]¬TryStatementÍQÍ´O®BlockStatementÍUÍC•K³VariableDeclarationÍ\Íƒ‘L²VariableDeclaratorÍbÍ‚MªIdentifierÍbÍk©lastIndexP®CallExpressionÍnÍ‚Q°MemberExpressionÍnÍ}MªIdentifierÍnÍq£urlMªIdentifierÍrÍ}«lastIndexOfÂÂ‘R§LiteralÍ~Í¡/£'/'Â¥constK³VariableDeclarationÍ‰Íµ‘L²VariableDeclaratorÍÍ´MªIdentifierÍÍ•¦resultP®CallExpressionÍ˜Í´Q°MemberExpressionÍ˜Í¥MªIdentifierÍ˜Í›£urlMªIdentifierÍœÍ¥©substringÂÂ‘S°BinaryExpressionÍ¦Í³MªIdentifierÍ¦Í¯©lastIndex¡+R§LiteralÍ²Í³¡1Â¥constK³VariableDeclarationÍ+Í½‘L²VariableDeclaratorÍ/Í¼MªIdentifierÍ/Í7¨filePath\µConditionalExpressionÍ:Í¼P®CallExpressionÍ:ÍZMªIdentifierÍ:ÍC©hasSuffix’MªIdentifierÍDÍG£urlÔr_”¤type¥start£end¨elements¯ArrayExpressionÍIÍY’R§LiteralÍJÍQ¥.json§'.json'R§LiteralÍSÍX£.js¥'.js'ÂT¯TemplateLiteralÍ]Ít’MªIdentifierÍ`Íh¨readPathMªIdentifierÍlÍr¦result“U¯TemplateElementÍ^Í^V  ÂU¯TemplateElementÍiÍjV¡/¡/ÂU¯TemplateElementÍsÍsV  ÃT¯TemplateLiteralÍ~Í¼’MªIdentifierÍÍ‰¨readPathP®CallExpressionÍÍºMªIdentifierÍÍ—ªfilterJson’MªIdentifierÍ˜Í ¨readPathP®CallExpressionÍ¢Í¹Q°MemberExpressionÍ¢Í®MªIdentifierÍ¢Í¥£urlMªIdentifierÍ¦Í®¨endsWithÂÂ‘R§LiteralÍ¯Í¸§.lottie©'.lottie'ÂÂ“U¯TemplateElementÍÍV  ÂU¯TemplateElementÍŠÍ‹V¡/¡/ÂU¯TemplateElementÍ»Í»V  Ã£letK³VariableDeclarationÍÜÍ‘L²VariableDeclaratorÍàÍMªIdentifierÍàÍç§isExistP®CallExpressionÍêÍMªIdentifierÍêÍü²isSandboxFileExist‘MªIdentifierÍıÍ¨filePathÂ£letY¯ReturnStatementÍÍ>W°ObjectExpressionÍÍ=’Ôr`™¤type¥start£end¦method©shorthand¨computed£key¤kind¥value¨PropertyÍÍ$ÂÃÂMªIdentifierÍÍ$§isExist¤initMªIdentifierÍÍ$§isExist`¨PropertyÍ-Í5ÂÃÂMªIdentifierÍ-Í5¨filePath¤initMªIdentifierÍ-Í5¨filePath^«CatchClauseÍDÍ´MªIdentifierÍKÍN£errO®BlockStatementÍPÍ´’[³ExpressionStatementÍWÍ˜P®CallExpressionÍWÍ—Q°MemberExpressionÍWÍdMªIdentifierÍWÍ^§LogUtilMªIdentifierÍ_Íd¥errorÂÂ‘T¯TemplateLiteralÍeÍ–‘P®CallExpressionÍÍ”Q°MemberExpressionÍÍMªIdentifierÍÍ…¤JSONMªIdentifierÍ†Í©stringifyÂÂ‘MªIdentifierÍÍ“£errÂ’U¯TemplateElementÍfÍV¹Method isCacheExist err: ¹Method isCacheExist err: ÂU¯TemplateElementÍ•Í•V  ÃÂY¯ReturnStatementÍÍ¯MªIdentifierÍ¥Í®©undefinedÀ¥constÀJ¶ExportNamedDeclarationÍ&Í™K³VariableDeclarationÍ-Í™‘L²VariableDeclaratorÍ3Í˜MªIdentifierÍ3Í<©isHaveImgN²FunctionExpressionÍ?Í˜ÀÂÂÂ‘MªIdentifierÍIÍL£wayO®BlockStatementÍNÍ˜‘]¬TryStatementÍSÍ•O®BlockStatementÍWÍ$’K³VariableDeclarationÍ^Íš‘L²VariableDeclaratorÍbÍ™MªIdentifierÍbÍj¨imgFilesP®CallExpressionÍmÍ™MªIdentifierÍmÍy¬listFileSync’MªIdentifierÍzÍ}£way_¯ArrayExpressionÍÍ˜“R§LiteralÍ€Í†¤.png¦'.png'R§LiteralÍˆÍ¤.jpg¦'.jpg'R§LiteralÍÍ—¥.jpeg§'.jpeg'Â£letY¯ReturnStatementÍ ÍP®CallExpressionÍ§ÍQ°MemberExpressionÍ§Í´MªIdentifierÍ§Í¯¨imgFilesMªIdentifierÍ°Í´¤someÂÂ‘N·ArrowFunctionExpressionÍµÍÀÂÂÂ‘MªIdentifierÍµÍ¹¤itemO®BlockStatementÍ½Í‘Y¯ReturnStatementÍÆÍS±LogicalExpressionÍÍÍS±LogicalExpressionÍÍÍûP®CallExpressionÍÍÍâQ°MemberExpressionÍÍÍÚMªIdentifierÍÍÍÑ¤itemMªIdentifierÍÒÍÚ¨endsWithÂÂ‘R§LiteralÍÛÍá¤.png¦'.png'Â¢||P®CallExpressionÍæÍûQ°MemberExpressionÍæÍóMªIdentifierÍæÍê¤itemMªIdentifierÍëÍó¨endsWithÂÂ‘R§LiteralÍôÍú¤.jpg¦'.jpg'Â¢||P®CallExpressionÍÿÍQ°MemberExpressionÍÿÍMªIdentifierÍÿÍ¤itemMªIdentifierÍÍ¨endsWithÂÂ‘R§LiteralÍÍ¥.jpeg§'.jpeg'ÂÂ^«CatchClauseÍ%Í•MªIdentifierÍ,Í/£errO®BlockStatementÍ1Í•’[³ExpressionStatementÍ8ÍyP®CallExpressionÍ8ÍxQ°MemberExpressionÍ8ÍEMªIdentifierÍ8Í?§LogUtilMªIdentifierÍ@ÍE¥errorÂÂ‘T¯TemplateLiteralÍFÍw‘P®CallExpressionÍbÍuQ°MemberExpressionÍbÍpMªIdentifierÍbÍf¤JSONMªIdentifierÍgÍp©stringifyÂÂ‘MªIdentifierÍqÍt£errÂ’U¯TemplateElementÍGÍ`V¹Method isCacheExist err: ¹Method isCacheExist err: ÂU¯TemplateElementÍvÍvV  ÃÂY¯ReturnStatementÍÍMªIdentifierÍ†Í©undefinedÀ¥constÀJ¶ExportNamedDeclarationÍƒÍK³VariableDeclarationÍŠÍ‘L²VariableDeclaratorÍÍMªIdentifierÍÍœ¬handleAssetsN²FunctionExpressionÍŸÍÀÂÂÂ‘MªIdentifierÍ©Í³ªlottieDataO®BlockStatementÍµÍ“K³VariableDeclarationÍºÍÑ‘L²VariableDeclaratorÍ¾ÍĞMªIdentifierÍ¾ÍË­updatedAssets[¯ChainExpressionÍÎÍĞP®CallExpressionÍÎÍĞQ°MemberExpressionÍÎÍåQ°MemberExpressionÍÎÍàMªIdentifierÍÎÍØªlottieDataMªIdentifierÍÚÍà¦assetsÂÃMªIdentifierÍâÍå£mapÂÃ‘N·ArrowFunctionExpressionÍæÍÏÀÂÂÂ’MªIdentifierÍçÍë¤itemMªIdentifierÍíÍò¥indexO®BlockStatementÍ÷ÍÏ’\«IfStatementÍşÍ¸S±LogicalExpressionÍÍ0S±LogicalExpressionÍÍQ°MemberExpressionÍÍ	MªIdentifierÍÍ¤itemMªIdentifierÍÍ	¢idÂÂ¢&&Q°MemberExpressionÍÍMªIdentifierÍÍ¤itemMªIdentifierÍÍ¡pÂÂ¢&&P®CallExpressionÍÍ0Q°MemberExpressionÍÍ(Q°MemberExpressionÍÍMªIdentifierÍÍ¤itemMªIdentifierÍÍ¡pÂÂMªIdentifierÍÍ(ªstartsWithÂÂ‘R§LiteralÍ)Í/¤http¦'http'ÂO®BlockStatementÍ2Í¸’[³ExpressionStatementÍ;ÍUÔra–¤type¥start£end¨operator¤left¥right´AssignmentExpressionÍ;ÍT¡=Q°MemberExpressionÍ;ÍAMªIdentifierÍ;Í?¤itemMªIdentifierÍ@ÍA¡pÂÂT¯TemplateLiteralÍDÍT‘Q°MemberExpressionÍGÍNMªIdentifierÍGÍK¤itemMªIdentifierÍLÍN¢idÂÂ’U¯TemplateElementÍEÍEV  ÂU¯TemplateElementÍOÍSV¤.png¤.pngÃ\«IfStatementÍ]Í±Ôrb–¤type¥start£end¨operator¦prefix¨argument¯UnaryExpressionÍaÍh¡!ÃQ°MemberExpressionÍbÍhMªIdentifierÍbÍf¤itemMªIdentifierÍgÍh¡uÂÂO®BlockStatementÍjÍ±’[³ExpressionStatementÍuÍ“a´AssignmentExpressionÍuÍ’¡=Q°MemberExpressionÍuÍ{MªIdentifierÍuÍy¤itemMªIdentifierÍzÍ{¡uÂÂR§LiteralÍ~Í’²lottie/loadImages/´'lottie/loadImages/'[³ExpressionStatementÍÍ¨a´AssignmentExpressionÍÍ§¡=Q°MemberExpressionÍÍ£MªIdentifierÍÍ¡¤itemMªIdentifierÍ¢Í£¡eÂÂR§LiteralÍ¦Í§ ¡0ÀÀY¯ReturnStatementÍ¾ÍÊMªIdentifierÍÅÍÉ¤itemÂ£let[³ExpressionStatementÍÕÍ÷a´AssignmentExpressionÍÕÍö¡=Q°MemberExpressionÍÕÍæMªIdentifierÍÕÍßªlottieDataMªIdentifierÍàÍæ¦assetsÂÂMªIdentifierÍéÍö­updatedAssetsY¯ReturnStatementÍûÍMªIdentifierÍÍªlottieData¥constÀJ¶ExportNamedDeclarationÍªÍ!˜K³VariableDeclarationÍ±Í!˜‘L²VariableDeclaratorÍ·Í!—MªIdentifierÍ·ÍÆ¯handleZipAssetsN²FunctionExpressionÍÉÍ!—ÀÂÂÂ’MªIdentifierÍÓÍİªlottieDataMªIdentifierÍßÍç¨zipRouteO®BlockStatementÍéÍ!——K³VariableDeclarationÍîÍ ‘L²VariableDeclaratorÍôÍ MªIdentifierÍôÍù¥partsP®CallExpressionÍüÍ Q°MemberExpressionÍüÍ 
+MªIdentifierÍüÍ ¨zipRouteMªIdentifierÍ Í 
+¥splitÂÂ‘R§LiteralÍ Í ¡/£'/'Â¥constK³VariableDeclarationÍ Í 5‘L²VariableDeclaratorÍ Í 4MªIdentifierÍ Í "¨lastPartP®CallExpressionÍ %Í 4Q°MemberExpressionÍ %Í 0MªIdentifierÍ %Í *¥partsMªIdentifierÍ +Í 0¥sliceÂÂ‘b¯UnaryExpressionÍ 1Í 3¡-ÃR§LiteralÍ 2Í 3¡3Â¥constK³VariableDeclarationÍ 9Í N‘L²VariableDeclaratorÍ =Í MMªIdentifierÍ =Í H«lastPartStrR§LiteralÍ KÍ M ¢''£let\«IfStatementÍ RÍ œP®CallExpressionÍ VÍ mQ°MemberExpressionÍ VÍ cMªIdentifierÍ VÍ [¥ArrayMªIdentifierÍ \Í c§isArrayÂÂ‘MªIdentifierÍ dÍ l¨lastPartÂO®BlockStatementÍ oÍ œ‘[³ExpressionStatementÍ vÍ —a´AssignmentExpressionÍ vÍ –¡=MªIdentifierÍ vÍ «lastPartStrP®CallExpressionÍ „Í –Q°MemberExpressionÍ „Í ‘MªIdentifierÍ „Í Œ¨lastPartMªIdentifierÍ Í ‘¤joinÂÂ‘R§LiteralÍ ’Í •¡/£'/'ÂÀK³VariableDeclarationÍ ¬Í!U‘L²VariableDeclaratorÍ °Í!TMªIdentifierÍ °Í À°updatedZipAssets[¯ChainExpressionÍ ÃÍ!TP®CallExpressionÍ ÃÍ!TQ°MemberExpressionÍ ÃÍ ÚQ°MemberExpressionÍ ÃÍ ÕMªIdentifierÍ ÃÍ ÍªlottieDataMªIdentifierÍ ÏÍ Õ¦assetsÂÃMªIdentifierÍ ×Í Ú£mapÂÃ‘N·ArrowFunctionExpressionÍ ÛÍ!SÀÂÂÂ’MªIdentifierÍ ÜÍ à¤itemMªIdentifierÍ âÍ ç¥indexO®BlockStatementÍ ìÍ!S’\«IfStatementÍ óÍ!<S±LogicalExpressionÍ ÷Í!Q°MemberExpressionÍ ÷Í şMªIdentifierÍ ÷Í û¤itemMªIdentifierÍ üÍ ş¢idÂÂ¢&&Q°MemberExpressionÍ!Í!MªIdentifierÍ!Í!¤itemMªIdentifierÍ!Í!¡uÂÂO®BlockStatementÍ!
+Í!<‘[³ExpressionStatementÍ!Í!5a´AssignmentExpressionÍ!Í!4¡=Q°MemberExpressionÍ!Í!MªIdentifierÍ!Í!¤itemMªIdentifierÍ!Í!¡uÂÂT¯TemplateLiteralÍ!Í!4‘MªIdentifierÍ!Í!*«lastPartStr’U¯TemplateElementÍ!Í!V  ÂU¯TemplateElementÍ!+Í!3V¨/images/¨/images/ÃÀY¯ReturnStatementÍ!BÍ!NMªIdentifierÍ!IÍ!M¤itemÂ£let[³ExpressionStatementÍ!YÍ!~a´AssignmentExpressionÍ!YÍ!}¡=Q°MemberExpressionÍ!YÍ!jMªIdentifierÍ!YÍ!cªlottieDataMªIdentifierÍ!dÍ!j¦assetsÂÂMªIdentifierÍ!mÍ!}°updatedZipAssetsY¯ReturnStatementÍ!‚Í!”MªIdentifierÍ!‰Í!“ªlottieData¥constÀJ¶ExportNamedDeclarationÍ"Í$¸K³VariableDeclarationÍ"Í$¸‘L²VariableDeclaratorÍ"Í$·MªIdentifierÍ"Í"'®createFilesDirN²FunctionExpressionÍ"*Í$·ÀÂÂÂ‘MªIdentifierÍ"4Í"7£urlO®BlockStatementÍ"9Í$·šK³VariableDeclarationÍ">Í"[‘L²VariableDeclaratorÍ"DÍ"ZMªIdentifierÍ"DÍ"I¥partsP®CallExpressionÍ"LÍ"ZQ°MemberExpressionÍ"LÍ"UMªIdentifierÍ"LÍ"O£urlMªIdentifierÍ"PÍ"U¥splitÂÂ‘R§LiteralÍ"VÍ"Y¡/£'/'Â¥const\«IfStatementÍ"_Í"¼S°BinaryExpressionÍ"cÍ"sQ°MemberExpressionÍ"cÍ"oMªIdentifierÍ"cÍ"h¥partsMªIdentifierÍ"iÍ"o¦lengthÂÂ¡<R§LiteralÍ"rÍ"s¡2O®BlockStatementÍ"uÍ"¼’[³ExpressionStatementÍ"|Í" P®CallExpressionÍ"|Í"ŸQ°MemberExpressionÍ"|Í"‰MªIdentifierÍ"|Í"ƒ§LogUtilMªIdentifierÍ"„Í"‰¥errorÂÂ‘T¯TemplateLiteralÍ"ŠÍ"‘U¯TemplateElementÍ"‹Í"V²Invalid URL format²Invalid URL formatÃÂY¯ReturnStatementÍ"¦Í"·MªIdentifierÍ"­Í"¶©undefinedÀK³VariableDeclarationÍ"ÔÍ#‘L²VariableDeclaratorÍ"ÚÍ#MªIdentifierÍ"ÚÍ"ç­directoryNameQ°MemberExpressionÍ"êÍ#MªIdentifierÍ"êÍ"ï¥partsS°BinaryExpressionÍ"ğÍ# Q°MemberExpressionÍ"ğÍ"üMªIdentifierÍ"ğÍ"õ¥partsMªIdentifierÍ"öÍ"ü¦lengthÂÂ¡-R§LiteralÍ"ÿÍ# ¡2ÃÂ¥constK³VariableDeclarationÍ#Í#U‘L²VariableDeclaratorÍ#%Í#TMªIdentifierÍ#%Í#:µfileNameWithExtensionQ°MemberExpressionÍ#=Í#TMªIdentifierÍ#=Í#B¥partsS°BinaryExpressionÍ#CÍ#SQ°MemberExpressionÍ#CÍ#OMªIdentifierÍ#CÍ#H¥partsMªIdentifierÍ#IÍ#O¦lengthÂÂ¡-R§LiteralÍ#RÍ#S¡1ÃÂ¥constK³VariableDeclarationÍ#YÍ#§‘L²VariableDeclaratorÍ#_Í#¦MªIdentifierÍ#_Í#g¨fileNameP®CallExpressionÍ#jÍ#¦Q°MemberExpressionÍ#jÍ#‡MªIdentifierÍ#jÍ#µfileNameWithExtensionMªIdentifierÍ#€Í#‡§replaceÂÂ’Ôrc–¤type¥start£end¥value£raw¥regex§LiteralÍ#ˆÍ#¡’¶\.(?:zip|json|lottie)$¡i¹/\.(?:zip|json|lottie)$/iÔrd’§pattern¥flags¶\.(?:zip|json|lottie)$¡iR§LiteralÍ#£Í#¥ ¢''Â¥constK³VariableDeclarationÍ#«Í#ö‘L²VariableDeclaratorÍ#±Í#õMªIdentifierÍ#±Í#¹¨basePathT¯TemplateLiteralÍ#¼Í#õ’S±LogicalExpressionÍ#¿Í#Û[¯ChainExpressionÍ#¿Í#ÕQ°MemberExpressionÍ#¿Í#ÕP®CallExpressionÍ#¿Í#ËMªIdentifierÍ#¿Í#ÉªgetContextÂMªIdentifierÍ#ÍÍ#Õ¨filesDirÂÃ¢||R§LiteralÍ#ÙÍ#Û ¢''MªIdentifierÍ#æÍ#ó­directoryName“U¯TemplateElementÍ#½Í#½V  ÂU¯TemplateElementÍ#ÜÍ#äV¨/lottie/¨/lottie/ÂU¯TemplateElementÍ#ôÍ#ôV  Ã¥constK³VariableDeclarationÍ#úÍ$%‘L²VariableDeclaratorÍ$ Í$$MªIdentifierÍ$ Í$¨fullPathT¯TemplateLiteralÍ$Í$$’MªIdentifierÍ$Í$¨basePathMªIdentifierÍ$Í$"¨fileName“U¯TemplateElementÍ$Í$V  ÂU¯TemplateElementÍ$Í$V¡/¡/ÂU¯TemplateElementÍ$#Í$#V  Ã¥const[³ExpressionStatementÍ$4Í$NP®CallExpressionÍ$4Í$MMªIdentifierÍ$4Í$=©mkdirSync’MªIdentifierÍ$>Í$F¨fullPathR§LiteralÍ$HÍ$LÃ¤trueÂK³VariableDeclarationÍ$RÍ$¢‘L²VariableDeclaratorÍ$VÍ$¡MªIdentifierÍ$VÍ$\¦resultW°ObjectExpressionÍ$_Í$¡’X¨PropertyÍ$fÍ$…ÂÂÂMªIdentifierÍ$fÍ$n¨dataNameMªIdentifierÍ$pÍ$…µfileNameWithExtension¤initX¨PropertyÍ$ŒÍ$›ÂÂÂMªIdentifierÍ$ŒÍ$‘¥routeMªIdentifierÍ$“Í$›¨fullPath¤init£letY¯ReturnStatementÍ$¦Í$´MªIdentifierÍ$­Í$³¦result¥constÀJ¶ExportNamedDeclarationÍ$ïÍ%œK³VariableDeclarationÍ$öÍ%œ‘L²VariableDeclaratorÍ$üÍ%›MªIdentifierÍ$üÍ%³createImageFilesDirN²FunctionExpressionÍ%Í%›ÀÂÂÂO®BlockStatementÍ%Í%›“K³VariableDeclarationÍ%#Í%b‘L²VariableDeclaratorÍ%'Í%aMªIdentifierÍ%'Í%1ªdirImgPathT¯TemplateLiteralÍ%4Í%a‘[¯ChainExpressionÍ%7Í%MQ°MemberExpressionÍ%7Í%MP®CallExpressionÍ%7Í%CMªIdentifierÍ%7Í%AªgetContextÂMªIdentifierÍ%EÍ%M¨filesDirÂÃ’U¯TemplateElementÍ%5Í%5V  ÂU¯TemplateElementÍ%NÍ%`V²/lottie/loadImages²/lottie/loadImagesÃ£let[³ExpressionStatementÍ%fÍ%‚P®CallExpressionÍ%fÍ%MªIdentifierÍ%fÍ%o©mkdirSync’MªIdentifierÍ%pÍ%zªdirImgPathR§LiteralÍ%|Í%€Ã¤trueÂY¯ReturnStatementÍ%†Í%˜MªIdentifierÍ%Í%—ªdirImgPath¥constÀJ¶ExportNamedDeclarationÍ&%Í(èK³VariableDeclarationÍ&,Í(è‘L²VariableDeclaratorÍ&2Í(çMªIdentifierÍ&2Í&E³combineArrayBuffersN²FunctionExpressionÍ&HÍ(çÀÂÂÂ‘MªIdentifierÍ&RÍ&^¬arrayBuffersO®BlockStatementÍ&`Í(ç—K³VariableDeclarationÍ&Í&™‘L²VariableDeclaratorÍ&…Í&˜MªIdentifierÍ&…Í&”¯totalByteLengthR§LiteralÍ&—Í&˜ ¡0£letÔre—¤type¥start£end¥await¤left¥right¤body®ForOfStatementÍ&Í&ûÂK³VariableDeclarationÍ&¢Í&³‘L²VariableDeclaratorÍ&¨Í&³MªIdentifierÍ&¨Í&³«arrayBufferÀ¥constMªIdentifierÍ&·Í&Ã¬arrayBuffersO®BlockStatementÍ&ÅÍ&û‘[³ExpressionStatementÍ&ÌÍ&öa´AssignmentExpressionÍ&ÌÍ&õ¢+=MªIdentifierÍ&ÌÍ&Û¯totalByteLengthQ°MemberExpressionÍ&ßÍ&õMªIdentifierÍ&ßÍ&ê«arrayBufferMªIdentifierÍ&ëÍ&õªbyteLengthÂÂK³VariableDeclarationÍ'Í'T‘L²VariableDeclaratorÍ'Í'SMªIdentifierÍ'Í'0³combinedArrayBufferZ­NewExpressionÍ'3Í'SMªIdentifierÍ'7Í'B«ArrayBuffer‘MªIdentifierÍ'CÍ'R¯totalByteLength¥constK³VariableDeclarationÍ'}Í'¼‘L²VariableDeclaratorÍ'ƒÍ'»MªIdentifierÍ'ƒÍ'•²combinedUint8ArrayZ­NewExpressionÍ'˜Í'»MªIdentifierÍ'œÍ'¦ªUint8Array‘MªIdentifierÍ'§Í'º³combinedArrayBuffer¥constK³VariableDeclarationÍ'êÍ'ù‘L²VariableDeclaratorÍ'îÍ'øMªIdentifierÍ'îÍ'ô¦offsetR§LiteralÍ'÷Í'ø ¡0£lete®ForOfStatementÍ'ıÍ(ÅÂK³VariableDeclarationÍ(Í(‘L²VariableDeclaratorÍ(Í(MªIdentifierÍ(Í(«arrayBufferÀ¥constMªIdentifierÍ(Í(#¬arrayBuffersO®BlockStatementÍ(%Í(Å“K³VariableDeclarationÍ(,Í(a‘L²VariableDeclaratorÍ(2Í(`MªIdentifierÍ(2Í(B°sourceUint8ArrayZ­NewExpressionÍ(EÍ(`MªIdentifierÍ(IÍ(SªUint8Array‘MªIdentifierÍ(TÍ(_«arrayBuffer¥const[³ExpressionStatementÍ(gÍ(˜P®CallExpressionÍ(gÍ(—Q°MemberExpressionÍ(gÍ(}MªIdentifierÍ(gÍ(y²combinedUint8ArrayMªIdentifierÍ(zÍ(}£setÂÂ’MªIdentifierÍ(~Í(°sourceUint8ArrayMªIdentifierÍ(Í(–¦offsetÂ[³ExpressionStatementÍ(Í(Àa´AssignmentExpressionÍ(Í(¿¢+=MªIdentifierÍ(Í(¤¦offsetQ°MemberExpressionÍ(¨Í(¿MªIdentifierÍ(¨Í(¸°sourceUint8ArrayMªIdentifierÍ(¹Í(¿¦lengthÂÂY¯ReturnStatementÍ(ÉÍ(äMªIdentifierÍ(ĞÍ(ã³combinedArrayBuffer¥constÀJ¶ExportNamedDeclarationÍ)]Í)ÃK³VariableDeclarationÍ)dÍ)Ã‘L²VariableDeclaratorÍ)jÍ)ÂMªIdentifierÍ)jÍ)tªisJsonFileN²FunctionExpressionÍ)wÍ)ÂÀÂÂÂ‘MªIdentifierÍ)Í)„£uriO®BlockStatementÍ)†Í)Â‘Y¯ReturnStatementÍ)‹Í)¿S±LogicalExpressionÍ)’Í)¾P®CallExpressionÍ)’Í)§Q°MemberExpressionÍ)’Í)MªIdentifierÍ)’Í)•£uriMªIdentifierÍ)–Í)¨endsWithÂÂ‘R§LiteralÍ)ŸÍ)¦¥.json§'.json'Â¢||P®CallExpressionÍ)«Í)¾Q°MemberExpressionÍ)«Í)·MªIdentifierÍ)«Í)®£uriMªIdentifierÍ)¯Í)·¨endsWithÂÂ‘R§LiteralÍ)¸Í)½£.js¥'.js'Â¥constÀJ¶ExportNamedDeclarationÍ*BÍ*°K³VariableDeclarationÍ*IÍ*°‘L²VariableDeclaratorÍ*OÍ*¯MªIdentifierÍ*OÍ*^¯isCompressdFileN²FunctionExpressionÍ*aÍ*¯ÀÂÂÂ‘MªIdentifierÍ*kÍ*n£uriO®BlockStatementÍ*pÍ*¯‘Y¯ReturnStatementÍ*uÍ*¬S±LogicalExpressionÍ*|Í*«P®CallExpressionÍ*|Í*Q°MemberExpressionÍ*|Í*ˆMªIdentifierÍ*|Í*£uriMªIdentifierÍ*€Í*ˆ¨endsWithÂÂ‘R§LiteralÍ*‰Í*¤.zip¦'.zip'Â¢||P®CallExpressionÍ*”Í*«Q°MemberExpressionÍ*”Í* MªIdentifierÍ*”Í*—£uriMªIdentifierÍ*˜Í* ¨endsWithÂÂ‘R§LiteralÍ*¡Í*ª§.lottie©'.lottie'Â¥constÀJ¶ExportNamedDeclarationÍ+0Í+ÆK³VariableDeclarationÍ+7Í+Æ‘L²VariableDeclaratorÍ+=Í+ÅMªIdentifierÍ+=Í+Q´isExistNetworkAssetsN²FunctionExpressionÍ+TÍ+ÅÀÂÂÂ‘MªIdentifierÍ+^Í+d¦assetsO®BlockStatementÍ+fÍ+Å‘Y¯ReturnStatementÍ+kÍ+Â[¯ChainExpressionÍ+rÍ+ÁP®CallExpressionÍ+rÍ+ÁQ°MemberExpressionÍ+rÍ+~MªIdentifierÍ+rÍ+x¦assetsMªIdentifierÍ+zÍ+~¤someÂÃ‘N·ArrowFunctionExpressionÍ+Í+ÀÀÂÂÂ‘MªIdentifierÍ+€Í+„¤itemO®BlockStatementÍ+‰Í+À‘Y¯ReturnStatementÍ+Í+»S±LogicalExpressionÍ+—Í+ºQ°MemberExpressionÍ+—Í+MªIdentifierÍ+—Í+›¤itemMªIdentifierÍ+œÍ+¡pÂÂ¢&&P®CallExpressionÍ+¡Í+ºQ°MemberExpressionÍ+¡Í+²Q°MemberExpressionÍ+¡Í+§MªIdentifierÍ+¡Í+¥¤itemMªIdentifierÍ+¦Í+§¡pÂÂMªIdentifierÍ+¨Í+²ªstartsWithÂÂ‘R§LiteralÍ+³Í+¹¤http¦'http'ÂÂ¥constÀ•Ôrf•¤type¥start£endªspecifiers¦source±ImportDeclarationÍnÍ‘Ôrg”¤type¥start£end¥local¶ImportDefaultSpecifierÍuÍwMªIdentifierÍuÍw¢fsR§LiteralÍ}ÍŒ­@ohos.file.fs¯'@ohos.file.fs'f±ImportDeclarationÍÍ­‘g¶ImportDefaultSpecifierÍ–ÍšMªIdentifierÍ–Íš¤utilR§LiteralÍ Í¬ª@ohos.util¬'@ohos.util'f±ImportDeclarationÍ¯ÍÍ‘g¶ImportDefaultSpecifierÍ¶ÍºMªIdentifierÍ¶Íº¤zlibR§LiteralÍÀÍÌª@ohos.zlib¬'@ohos.zlib'f±ImportDeclarationÍÏÍ4•Ôrh•¤type¥start£end¨imported¥local¯ImportSpecifierÍØÍäMªIdentifierÍØÍä¬moveFileSyncMªIdentifierÍØÍä¬moveFileSynch¯ImportSpecifierÍæÍïMªIdentifierÍæÍï©mkdirSyncMªIdentifierÍæÍï©mkdirSynch¯ImportSpecifierÍñÍıMªIdentifierÍñÍı¬listFileSyncMªIdentifierÍñÍı¬listFileSynch¯ImportSpecifierÍÿÍMªIdentifierÍÿÍ¬readFileSyncMªIdentifierÍÿÍ¬readFileSynch¯ImportSpecifierÍÍMªIdentifierÍÍ²isSandboxFileExistMªIdentifierÍÍ²isSandboxFileExistR§LiteralÍ'Í3ª./FileUtil¬'./FileUtil'f±ImportDeclarationÍ6ÍX‘h¯ImportSpecifierÍ>ÍEMªIdentifierÍ>ÍE§LogUtilMªIdentifierÍ>ÍE§LogUtilR§LiteralÍLÍW©./LogUtil«'./LogUtil'

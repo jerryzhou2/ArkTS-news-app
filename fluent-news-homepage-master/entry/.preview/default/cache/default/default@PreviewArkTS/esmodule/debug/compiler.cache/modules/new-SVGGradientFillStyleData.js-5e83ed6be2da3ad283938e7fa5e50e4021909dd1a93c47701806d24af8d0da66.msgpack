@@ -1,0 +1,302 @@
+‘r@ü™assertions§code¥customTransformCache¨dependencies¢id§meta±moduleSideEffects¨originalCode±originalSourcemap´resolvedIdsÆsourcemapChainµsyntheticNamedExportsµtransformDependenciesÆtransformFiles®cacheAst‘rAê⁄œimport {
+  degToRads,
+  createElementID,
+} from '../../../utils/common';
+import { getLocationHref } from '../../../main';
+import {
+  extendPrototype,
+} from '../../../utils/functionExtensions';
+import DynamicPropertyContainer from '../../../utils/helpers/dynamicProperties';
+import PropertyFactory from '../../../utils/PropertyFactory';
+import createNS from '../../../utils/helpers/svg_elements';
+import GradientProperty from '../../../utils/shapes/GradientProperty';
+import {
+  lineCapEnum,
+  lineJoinEnum,
+} from '../../../utils/helpers/shapeEnums';
+
+function SVGGradientFillStyleData(elem, data, styleOb) {
+  this.initDynamicPropertyContainer(elem);
+  this.getValue = this.iterateDynamicProperties;
+  this.initGradientData(elem, data, styleOb);
+}
+
+SVGGradientFillStyleData.prototype.initGradientData = function (elem, data, styleOb) {
+  this.o = PropertyFactory.getProp(elem, data.o, 0, 0.01, this);
+  this.s = PropertyFactory.getProp(elem, data.s, 1, null, this);
+  this.e = PropertyFactory.getProp(elem, data.e, 1, null, this);
+  this.h = PropertyFactory.getProp(elem, data.h || { k: 0 }, 0, 0.01, this);
+  this.a = PropertyFactory.getProp(elem, data.a || { k: 0 }, 0, degToRads, this);
+  this.g = new GradientProperty(elem, data.g, this);
+  this.style = styleOb;
+  this.stops = [];
+  this.setGradientData(styleOb.pElem, data);
+  this.setGradientOpacity(data, styleOb);
+  this._isAnimated = !!this._isAnimated;
+};
+
+SVGGradientFillStyleData.prototype.setGradientData = function (pathElement, data) {
+  var gradientId = createElementID();
+  var gfill = createNS(data.t === 1 ? 'linearGradient' : 'radialGradient');
+  gfill.setAttribute('id', gradientId);
+  gfill.setAttribute('spreadMethod', 'pad');
+  gfill.setAttribute('gradientUnits', 'userSpaceOnUse');
+  var stops = [];
+  var stop;
+  var j;
+  var jLen;
+  jLen = data.g.p * 4;
+  for (j = 0; j < jLen; j += 4) {
+    stop = createNS('stop');
+    gfill.appendChild(stop);
+    stops.push(stop);
+  }
+  pathElement.setAttribute(data.ty === 'gf' ? 'fill' : 'stroke', 'url(' + getLocationHref() + '#' + gradientId + ')');
+  this.gf = gfill;
+  this.cst = stops;
+};
+
+SVGGradientFillStyleData.prototype.setGradientOpacity = function (data, styleOb) {
+  if (this.g._hasOpacity && !this.g._collapsable) {
+    var stop;
+    var j;
+    var jLen;
+    var mask = createNS('mask');
+    var maskElement = createNS('path');
+    mask.appendChild(maskElement);
+    var opacityId = createElementID();
+    var maskId = createElementID();
+    mask.setAttribute('id', maskId);
+    var opFill = createNS(data.t === 1 ? 'linearGradient' : 'radialGradient');
+    opFill.setAttribute('id', opacityId);
+    opFill.setAttribute('spreadMethod', 'pad');
+    opFill.setAttribute('gradientUnits', 'userSpaceOnUse');
+    jLen = data.g.k.k[0].s ? data.g.k.k[0].s.length : data.g.k.k.length;
+    var stops = this.stops;
+    for (j = data.g.p * 4; j < jLen; j += 2) {
+      stop = createNS('stop');
+      stop.setAttribute('stop-color', 'rgb(255,255,255)');
+      opFill.appendChild(stop);
+      stops.push(stop);
+    }
+    maskElement.setAttribute(data.ty === 'gf' ? 'fill' : 'stroke', 'url(' + getLocationHref() + '#' + opacityId + ')');
+    if (data.ty === 'gs') {
+      maskElement.setAttribute('stroke-linecap', lineCapEnum[data.lc || 2]);
+      maskElement.setAttribute('stroke-linejoin', lineJoinEnum[data.lj || 2]);
+      if (data.lj === 1) {
+        maskElement.setAttribute('stroke-miterlimit', data.ml);
+      }
+    }
+    this.of = opFill;
+    this.ms = mask;
+    this.ost = stops;
+    this.maskId = maskId;
+    styleOb.msElem = maskElement;
+  }
+};
+
+extendPrototype([DynamicPropertyContainer], SVGGradientFillStyleData);
+
+export default SVGGradientFillStyleData;
+¬òŸëD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsŸâD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsŸùD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsŸ§D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\dynamicProperties.jsŸöD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\PropertyFactory.jsŸüD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\svg_elements.jsŸ¢D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\GradientProperty.jsŸùD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\shapeEnums.jsŸµD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGGradientFillStyleData.js‘rBò±isLocalDependencyØisNodeEntryFileßpkgPathßpkgName™pkgVersion±belongProjectPath±dependencyPkgInfo®commonjs¬¬ŸuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¨@ohos/lottie¶2.0.25Ÿ8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master‘rCíßpkgName™pkgVersion¨@ohos/lottie¶2.0.25‘rDí∞hasDefaultExport™isCommonJS√¬√⁄œimport {
+  degToRads,
+  createElementID,
+} from '../../../utils/common';
+import { getLocationHref } from '../../../main';
+import {
+  extendPrototype,
+} from '../../../utils/functionExtensions';
+import DynamicPropertyContainer from '../../../utils/helpers/dynamicProperties';
+import PropertyFactory from '../../../utils/PropertyFactory';
+import createNS from '../../../utils/helpers/svg_elements';
+import GradientProperty from '../../../utils/shapes/GradientProperty';
+import {
+  lineCapEnum,
+  lineJoinEnum,
+} from '../../../utils/helpers/shapeEnums';
+
+function SVGGradientFillStyleData(elem, data, styleOb) {
+  this.initDynamicPropertyContainer(elem);
+  this.getValue = this.iterateDynamicProperties;
+  this.initGradientData(elem, data, styleOb);
+}
+
+SVGGradientFillStyleData.prototype.initGradientData = function (elem, data, styleOb) {
+  this.o = PropertyFactory.getProp(elem, data.o, 0, 0.01, this);
+  this.s = PropertyFactory.getProp(elem, data.s, 1, null, this);
+  this.e = PropertyFactory.getProp(elem, data.e, 1, null, this);
+  this.h = PropertyFactory.getProp(elem, data.h || { k: 0 }, 0, 0.01, this);
+  this.a = PropertyFactory.getProp(elem, data.a || { k: 0 }, 0, degToRads, this);
+  this.g = new GradientProperty(elem, data.g, this);
+  this.style = styleOb;
+  this.stops = [];
+  this.setGradientData(styleOb.pElem, data);
+  this.setGradientOpacity(data, styleOb);
+  this._isAnimated = !!this._isAnimated;
+};
+
+SVGGradientFillStyleData.prototype.setGradientData = function (pathElement, data) {
+  var gradientId = createElementID();
+  var gfill = createNS(data.t === 1 ? 'linearGradient' : 'radialGradient');
+  gfill.setAttribute('id', gradientId);
+  gfill.setAttribute('spreadMethod', 'pad');
+  gfill.setAttribute('gradientUnits', 'userSpaceOnUse');
+  var stops = [];
+  var stop;
+  var j;
+  var jLen;
+  jLen = data.g.p * 4;
+  for (j = 0; j < jLen; j += 4) {
+    stop = createNS('stop');
+    gfill.appendChild(stop);
+    stops.push(stop);
+  }
+  pathElement.setAttribute(data.ty === 'gf' ? 'fill' : 'stroke', 'url(' + getLocationHref() + '#' + gradientId + ')');
+  this.gf = gfill;
+  this.cst = stops;
+};
+
+SVGGradientFillStyleData.prototype.setGradientOpacity = function (data, styleOb) {
+  if (this.g._hasOpacity && !this.g._collapsable) {
+    var stop;
+    var j;
+    var jLen;
+    var mask = createNS('mask');
+    var maskElement = createNS('path');
+    mask.appendChild(maskElement);
+    var opacityId = createElementID();
+    var maskId = createElementID();
+    mask.setAttribute('id', maskId);
+    var opFill = createNS(data.t === 1 ? 'linearGradient' : 'radialGradient');
+    opFill.setAttribute('id', opacityId);
+    opFill.setAttribute('spreadMethod', 'pad');
+    opFill.setAttribute('gradientUnits', 'userSpaceOnUse');
+    jLen = data.g.k.k[0].s ? data.g.k.k[0].s.length : data.g.k.k.length;
+    var stops = this.stops;
+    for (j = data.g.p * 4; j < jLen; j += 2) {
+      stop = createNS('stop');
+      stop.setAttribute('stop-color', 'rgb(255,255,255)');
+      opFill.appendChild(stop);
+      stops.push(stop);
+    }
+    maskElement.setAttribute(data.ty === 'gf' ? 'fill' : 'stroke', 'url(' + getLocationHref() + '#' + opacityId + ')');
+    if (data.ty === 'gs') {
+      maskElement.setAttribute('stroke-linecap', lineCapEnum[data.lc || 2]);
+      maskElement.setAttribute('stroke-linejoin', lineJoinEnum[data.lj || 2]);
+      if (data.lj === 1) {
+        maskElement.setAttribute('stroke-miterlimit', data.ml);
+      }
+    }
+    this.of = opFill;
+    this.ms = mask;
+    this.ost = stops;
+    this.maskId = maskId;
+    styleOb.msElem = maskElement;
+  }
+};
+
+extendPrototype([DynamicPropertyContainer], SVGGradientFillStyleData);
+
+export default SVGGradientFillStyleData;
+‘rEïßversion®mappings•namesßsourcesÆsourcesContent‹ eëî    ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî  	 ëî  
+ ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî   ëî    ëî  ! ëî  " ëî  # ëî  $ ëî  % ëî  & ëî  ' ëî  ( ëî  ) ëî  * ëî  + ëî  , ëî  - ëî  . ëî  / ëî  0 ëî  1 ëî  2 ëî  3 ëî  4 ëî  5 ëî  6 ëî  7 ëî  8 ëî  9 ëî  : ëî  ; ëî  < ëî  = ëî  > ëî  ? ëî  Ã@ ëî  ÃA ëî  ÃB ëî  ÃC ëî  ÃD ëî  ÃE ëî  ÃF ëî  ÃG ëî  ÃH ëî  ÃI ëî  ÃJ ëî  ÃK ëî  ÃL ëî  ÃM ëî  ÃN ëî  ÃO ëî  ÃP ëî  ÃQ ëî  ÃR ëî  ÃS ëî  ÃT ëî  ÃU ëî  ÃV ëî  ÃW ëî  ÃX ëî  ÃY ëî  ÃZ ëî  Ã[ ëî  Ã\ ëî  Ã] ëî  Ã^ ëî  Ã_ ëî  Ã` ëî  Ãa ëî  Ãb ëî  Ãc êêëŸµD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\elements\helpers\shapes\SVGGradientFillStyleData.jsë⁄œimport {
+  degToRads,
+  createElementID,
+} from '../../../utils/common';
+import { getLocationHref } from '../../../main';
+import {
+  extendPrototype,
+} from '../../../utils/functionExtensions';
+import DynamicPropertyContainer from '../../../utils/helpers/dynamicProperties';
+import PropertyFactory from '../../../utils/PropertyFactory';
+import createNS from '../../../utils/helpers/svg_elements';
+import GradientProperty from '../../../utils/shapes/GradientProperty';
+import {
+  lineCapEnum,
+  lineJoinEnum,
+} from '../../../utils/helpers/shapeEnums';
+
+function SVGGradientFillStyleData(elem, data, styleOb) {
+  this.initDynamicPropertyContainer(elem);
+  this.getValue = this.iterateDynamicProperties;
+  this.initGradientData(elem, data, styleOb);
+}
+
+SVGGradientFillStyleData.prototype.initGradientData = function (elem, data, styleOb) {
+  this.o = PropertyFactory.getProp(elem, data.o, 0, 0.01, this);
+  this.s = PropertyFactory.getProp(elem, data.s, 1, null, this);
+  this.e = PropertyFactory.getProp(elem, data.e, 1, null, this);
+  this.h = PropertyFactory.getProp(elem, data.h || { k: 0 }, 0, 0.01, this);
+  this.a = PropertyFactory.getProp(elem, data.a || { k: 0 }, 0, degToRads, this);
+  this.g = new GradientProperty(elem, data.g, this);
+  this.style = styleOb;
+  this.stops = [];
+  this.setGradientData(styleOb.pElem, data);
+  this.setGradientOpacity(data, styleOb);
+  this._isAnimated = !!this._isAnimated;
+};
+
+SVGGradientFillStyleData.prototype.setGradientData = function (pathElement, data) {
+  var gradientId = createElementID();
+  var gfill = createNS(data.t === 1 ? 'linearGradient' : 'radialGradient');
+  gfill.setAttribute('id', gradientId);
+  gfill.setAttribute('spreadMethod', 'pad');
+  gfill.setAttribute('gradientUnits', 'userSpaceOnUse');
+  var stops = [];
+  var stop;
+  var j;
+  var jLen;
+  jLen = data.g.p * 4;
+  for (j = 0; j < jLen; j += 4) {
+    stop = createNS('stop');
+    gfill.appendChild(stop);
+    stops.push(stop);
+  }
+  pathElement.setAttribute(data.ty === 'gf' ? 'fill' : 'stroke', 'url(' + getLocationHref() + '#' + gradientId + ')');
+  this.gf = gfill;
+  this.cst = stops;
+};
+
+SVGGradientFillStyleData.prototype.setGradientOpacity = function (data, styleOb) {
+  if (this.g._hasOpacity && !this.g._collapsable) {
+    var stop;
+    var j;
+    var jLen;
+    var mask = createNS('mask');
+    var maskElement = createNS('path');
+    mask.appendChild(maskElement);
+    var opacityId = createElementID();
+    var maskId = createElementID();
+    mask.setAttribute('id', maskId);
+    var opFill = createNS(data.t === 1 ? 'linearGradient' : 'radialGradient');
+    opFill.setAttribute('id', opacityId);
+    opFill.setAttribute('spreadMethod', 'pad');
+    opFill.setAttribute('gradientUnits', 'userSpaceOnUse');
+    jLen = data.g.k.k[0].s ? data.g.k.k[0].s.length : data.g.k.k.length;
+    var stops = this.stops;
+    for (j = data.g.p * 4; j < jLen; j += 2) {
+      stop = createNS('stop');
+      stop.setAttribute('stop-color', 'rgb(255,255,255)');
+      opFill.appendChild(stop);
+      stops.push(stop);
+    }
+    maskElement.setAttribute(data.ty === 'gf' ? 'fill' : 'stroke', 'url(' + getLocationHref() + '#' + opacityId + ')');
+    if (data.ty === 'gs') {
+      maskElement.setAttribute('stroke-linecap', lineCapEnum[data.lc || 2]);
+      maskElement.setAttribute('stroke-linejoin', lineJoinEnum[data.lj || 2]);
+      if (data.lj === 1) {
+        maskElement.setAttribute('stroke-miterlimit', data.ml);
+      }
+    }
+    this.of = opFill;
+    this.ms = mask;
+    this.ost = stops;
+    this.maskId = maskId;
+    styleOb.msElem = maskElement;
+  }
+};
+
+extendPrototype([DynamicPropertyContainer], SVGGradientFillStyleData);
+
+export default SVGGradientFillStyleData;
+‘rFòµ../../../utils/common≠../../../mainŸ!../../../utils/functionExtensionsæ../../../utils/PropertyFactoryŸ(../../../utils/helpers/dynamicPropertiesŸ#../../../utils/helpers/svg_elementsŸ&../../../utils/shapes/GradientPropertyŸ!../../../utils/helpers/shapeEnums‘rGó™assertions®external¢id§meta±moduleSideEffects™resolvedByµsyntheticNamedExportsA¬ŸëD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsA√™oh-resolve¬GA¬ŸâD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsA√™oh-resolve¬GA¬ŸùD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\functionExtensions.jsA√™oh-resolve¬GA¬ŸöD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\PropertyFactory.jsA√™oh-resolve¬GA¬Ÿ§D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\dynamicProperties.jsA√™oh-resolve¬GA¬ŸüD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\svg_elements.jsA√™oh-resolve¬GA¬Ÿ¢D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\GradientProperty.jsA√™oh-resolve¬GA¬ŸùD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\helpers\shapeEnums.jsA√™oh-resolve¬ë‘rHíßmissing¶plugin√¶genAbc¬ê‘  ‘rIî≤dynamicImportCacheπexportAllDeclarationCacheªexportNamedDeclarationCache´importCacheêêêò‘rJï§type•start£end™specifiers¶source±ImportDeclaration ÃKí‘rKï§type•start£end®imported•localØImportSpecifier‘rLî§type•start£end§name™Identifier©degToRadsL™Identifier©degToRadsKØImportSpecifier)L™Identifier)ØcreateElementIDL™Identifier)ØcreateElementID‘rMï§type•start£end•value£rawßLiteral3ÃJµ../../../utils/common∑'../../../utils/common'J±ImportDeclarationÃMÃ}ëKØImportSpecifierÃVÃeL™IdentifierÃVÃeØgetLocationHrefL™IdentifierÃVÃeØgetLocationHrefMßLiteralÃmÃ|≠../../../mainØ'../../../main'J±ImportDeclarationÃÃ»ëKØImportSpecifierÃãÃöL™IdentifierÃãÃöØextendPrototypeL™IdentifierÃãÃöØextendPrototypeMßLiteralÃ§Ã«Ÿ!../../../utils/functionExtensionsŸ#'../../../utils/functionExtensions'J±ImportDeclarationÃ Õë‘rNî§type•start£end•local∂ImportDefaultSpecifierÃ—ÃÈL™IdentifierÃ—ÃÈ∏DynamicPropertyContainerMßLiteralÃÔÕŸ(../../../utils/helpers/dynamicPropertiesŸ*'../../../utils/helpers/dynamicProperties'J±ImportDeclarationÕÕYëN∂ImportDefaultSpecifierÕ#Õ2L™IdentifierÕ#Õ2ØPropertyFactoryMßLiteralÕ8ÕXæ../../../utils/PropertyFactoryŸ '../../../utils/PropertyFactory'J±ImportDeclarationÕ[ÕñëN∂ImportDefaultSpecifierÕbÕjL™IdentifierÕbÕj®createNSMßLiteralÕpÕïŸ#../../../utils/helpers/svg_elementsŸ%'../../../utils/helpers/svg_elements'J±ImportDeclarationÕòÕﬁëN∂ImportDefaultSpecifierÕüÕØL™IdentifierÕüÕØ∞GradientPropertyMßLiteralÕµÕ›Ÿ&../../../utils/shapes/GradientPropertyŸ('../../../utils/shapes/GradientProperty'J±ImportDeclarationÕ‡Õ6íKØImportSpecifierÕÏÕ˜L™IdentifierÕÏÕ˜´lineCapEnumL™IdentifierÕÏÕ˜´lineCapEnumKØImportSpecifierÕ¸ÕL™IdentifierÕ¸Õ¨lineJoinEnumL™IdentifierÕ¸Õ¨lineJoinEnumMßLiteralÕÕ5Ÿ!../../../utils/helpers/shapeEnumsŸ#'../../../utils/helpers/shapeEnums'

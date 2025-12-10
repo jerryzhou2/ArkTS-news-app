@@ -1,0 +1,446 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚîimport { setLocationHref, setWebWorker } from '../main';
+import animationManager from '../animation/AnimationManager';
+import {
+  setDefaultCurveSegments,
+  getDefaultCurveSegments,
+  roundValues,
+  setIdPrefix,
+  setSubframeEnabled,
+  setExpressionsPlugin,
+} from '../utils/common';
+import PropertyFactory from '../utils/PropertyFactory';
+import ShapePropertyFactory from '../utils/shapes/ShapeProperty';
+import Matrix from '../3rd_party/transformation-matrix';
+
+const lottie = {};
+var standalone = '__[STANDALONE]__';
+var animationData = '__[ANIMATIONDATA]__';
+var renderer = '';
+
+function setLocation(href) {
+  setLocationHref(href);
+}
+
+function searchAnimations() {
+  if (standalone === true) {
+    animationManager.searchAnimations(animationData, standalone, renderer);
+  } else {
+    animationManager.searchAnimations();
+  }
+}
+
+function setSubframeRendering(flag) {
+  setSubframeEnabled(flag);
+}
+
+function setPrefix(prefix) {
+  setIdPrefix(prefix);
+}
+
+function loadAnimation(params) {
+  if (standalone === true) {
+    params.animationData = JSON.parse(animationData);
+  }
+  return animationManager.loadAnimation(params);
+}
+
+function setQuality(value) {
+  if (typeof value === 'string') {
+    switch (value) {
+      case 'high':
+        setDefaultCurveSegments(200);
+        break;
+      default:
+      case 'medium':
+        setDefaultCurveSegments(50);
+        break;
+      case 'low':
+        setDefaultCurveSegments(10);
+        break;
+    }
+  } else if (!isNaN(value) && value > 1) {
+    setDefaultCurveSegments(value);
+  }
+  if (getDefaultCurveSegments() >= 50) {
+    roundValues(false);
+  } else {
+    roundValues(true);
+  }
+}
+
+function inBrowser() {
+  return false;
+}
+
+function installPlugin(type, plugin) {
+  if (type === 'expressions') {
+    setExpressionsPlugin(plugin);
+  }
+}
+
+function getFactory(name) {
+  switch (name) {
+    case 'propertyFactory':
+      return PropertyFactory;
+    case 'shapePropertyFactory':
+      return ShapePropertyFactory;
+    case 'matrix':
+      return Matrix;
+    default:
+      return null;
+  }
+}
+
+
+lottie.play = animationManager.play;
+lottie.pause = animationManager.pause;
+lottie.setLocationHref = setLocation;
+lottie.togglePause = animationManager.togglePause;
+lottie.setSpeed = animationManager.setSpeed;
+lottie.setDirection = animationManager.setDirection;
+lottie.stop = animationManager.stop;
+lottie.searchAnimations = searchAnimations;
+lottie.registerAnimation = animationManager.registerAnimation;
+lottie.loadAnimation = loadAnimation;
+lottie.setSubframeRendering = setSubframeRendering;
+lottie.resize = animationManager.resize;
+lottie.setContentMode = animationManager.setContentMode;
+lottie.clearFileCache = animationManager.clearFileCache;
+lottie.clearFileCacheSync = animationManager.clearFileCacheSync;
+// lottie.start = start;
+lottie.goToAndStop = animationManager.goToAndStop;
+lottie.goToAndPlay = animationManager.goToAndPlay;
+lottie.destroy = animationManager.destroy;
+lottie.setFrameRate = animationManager.setFrameRate;
+lottie.setQuality = setQuality;
+lottie.inBrowser = inBrowser;
+lottie.installPlugin = installPlugin;
+lottie.freeze = animationManager.freeze;
+lottie.unfreeze = animationManager.unfreeze;
+lottie.setVolume = animationManager.setVolume;
+lottie.mute = animationManager.mute;
+lottie.unmute = animationManager.unmute;
+lottie.getRegisteredAnimations = animationManager.getRegisteredAnimations;
+lottie.bindContext2dToCoordinator = animationManager.bindContext2dToCoordinator;
+lottie.unbindContext2dFromCoordinator = animationManager.unbindContext2dFromCoordinator;
+lottie.setAttachedCanvasHasVisibleArea = animationManager.setAttachedCanvasHasVisibleArea;
+lottie.useWebWorker = setWebWorker;
+lottie.setIDPrefix = setPrefix;
+lottie.__getFactory = getFactory;
+lottie.version = '[[BM_VERSION]]';
+
+
+function getQueryVariable(variable) {
+  var vars = queryString.split('&');
+  for (var i = 0; i < vars.length; i += 1) {
+    var pair = vars[i].split('=');
+    if (decodeURIComponent(pair[0]) == variable) { // eslint-disable-line eqeqeq
+      return decodeURIComponent(pair[1]);
+    }
+  }
+  return null;
+}
+var queryString = '';
+if (standalone) {
+  renderer = getQueryVariable('renderer');
+}
+
+export default lottie;
+Â–Ù‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationManager.jsÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\PropertyFactory.jsÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeProperty.jsÙ¤D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\3rd_party\transformation-matrix.jsÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\modules\main.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚîimport { setLocationHref, setWebWorker } from '../main';
+import animationManager from '../animation/AnimationManager';
+import {
+  setDefaultCurveSegments,
+  getDefaultCurveSegments,
+  roundValues,
+  setIdPrefix,
+  setSubframeEnabled,
+  setExpressionsPlugin,
+} from '../utils/common';
+import PropertyFactory from '../utils/PropertyFactory';
+import ShapePropertyFactory from '../utils/shapes/ShapeProperty';
+import Matrix from '../3rd_party/transformation-matrix';
+
+const lottie = {};
+var standalone = '__[STANDALONE]__';
+var animationData = '__[ANIMATIONDATA]__';
+var renderer = '';
+
+function setLocation(href) {
+  setLocationHref(href);
+}
+
+function searchAnimations() {
+  if (standalone === true) {
+    animationManager.searchAnimations(animationData, standalone, renderer);
+  } else {
+    animationManager.searchAnimations();
+  }
+}
+
+function setSubframeRendering(flag) {
+  setSubframeEnabled(flag);
+}
+
+function setPrefix(prefix) {
+  setIdPrefix(prefix);
+}
+
+function loadAnimation(params) {
+  if (standalone === true) {
+    params.animationData = JSON.parse(animationData);
+  }
+  return animationManager.loadAnimation(params);
+}
+
+function setQuality(value) {
+  if (typeof value === 'string') {
+    switch (value) {
+      case 'high':
+        setDefaultCurveSegments(200);
+        break;
+      default:
+      case 'medium':
+        setDefaultCurveSegments(50);
+        break;
+      case 'low':
+        setDefaultCurveSegments(10);
+        break;
+    }
+  } else if (!isNaN(value) && value > 1) {
+    setDefaultCurveSegments(value);
+  }
+  if (getDefaultCurveSegments() >= 50) {
+    roundValues(false);
+  } else {
+    roundValues(true);
+  }
+}
+
+function inBrowser() {
+  return false;
+}
+
+function installPlugin(type, plugin) {
+  if (type === 'expressions') {
+    setExpressionsPlugin(plugin);
+  }
+}
+
+function getFactory(name) {
+  switch (name) {
+    case 'propertyFactory':
+      return PropertyFactory;
+    case 'shapePropertyFactory':
+      return ShapePropertyFactory;
+    case 'matrix':
+      return Matrix;
+    default:
+      return null;
+  }
+}
+
+
+lottie.play = animationManager.play;
+lottie.pause = animationManager.pause;
+lottie.setLocationHref = setLocation;
+lottie.togglePause = animationManager.togglePause;
+lottie.setSpeed = animationManager.setSpeed;
+lottie.setDirection = animationManager.setDirection;
+lottie.stop = animationManager.stop;
+lottie.searchAnimations = searchAnimations;
+lottie.registerAnimation = animationManager.registerAnimation;
+lottie.loadAnimation = loadAnimation;
+lottie.setSubframeRendering = setSubframeRendering;
+lottie.resize = animationManager.resize;
+lottie.setContentMode = animationManager.setContentMode;
+lottie.clearFileCache = animationManager.clearFileCache;
+lottie.clearFileCacheSync = animationManager.clearFileCacheSync;
+// lottie.start = start;
+lottie.goToAndStop = animationManager.goToAndStop;
+lottie.goToAndPlay = animationManager.goToAndPlay;
+lottie.destroy = animationManager.destroy;
+lottie.setFrameRate = animationManager.setFrameRate;
+lottie.setQuality = setQuality;
+lottie.inBrowser = inBrowser;
+lottie.installPlugin = installPlugin;
+lottie.freeze = animationManager.freeze;
+lottie.unfreeze = animationManager.unfreeze;
+lottie.setVolume = animationManager.setVolume;
+lottie.mute = animationManager.mute;
+lottie.unmute = animationManager.unmute;
+lottie.getRegisteredAnimations = animationManager.getRegisteredAnimations;
+lottie.bindContext2dToCoordinator = animationManager.bindContext2dToCoordinator;
+lottie.unbindContext2dFromCoordinator = animationManager.unbindContext2dFromCoordinator;
+lottie.setAttachedCanvasHasVisibleArea = animationManager.setAttachedCanvasHasVisibleArea;
+lottie.useWebWorker = setWebWorker;
+lottie.setIDPrefix = setPrefix;
+lottie.__getFactory = getFactory;
+lottie.version = '[[BM_VERSION]]';
+
+
+function getQueryVariable(variable) {
+  var vars = queryString.split('&');
+  for (var i = 0; i < vars.length; i += 1) {
+    var pair = vars[i].split('=');
+    if (decodeURIComponent(pair[0]) == variable) { // eslint-disable-line eqeqeq
+      return decodeURIComponent(pair[1]);
+    }
+  }
+  return null;
+}
+var queryString = '';
+if (standalone) {
+  renderer = getQueryVariable('renderer');
+}
+
+export default lottie;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ •‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  ÌŽ ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘Ù‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\modules\main.js‘Úîimport { setLocationHref, setWebWorker } from '../main';
+import animationManager from '../animation/AnimationManager';
+import {
+  setDefaultCurveSegments,
+  getDefaultCurveSegments,
+  roundValues,
+  setIdPrefix,
+  setSubframeEnabled,
+  setExpressionsPlugin,
+} from '../utils/common';
+import PropertyFactory from '../utils/PropertyFactory';
+import ShapePropertyFactory from '../utils/shapes/ShapeProperty';
+import Matrix from '../3rd_party/transformation-matrix';
+
+const lottie = {};
+var standalone = '__[STANDALONE]__';
+var animationData = '__[ANIMATIONDATA]__';
+var renderer = '';
+
+function setLocation(href) {
+  setLocationHref(href);
+}
+
+function searchAnimations() {
+  if (standalone === true) {
+    animationManager.searchAnimations(animationData, standalone, renderer);
+  } else {
+    animationManager.searchAnimations();
+  }
+}
+
+function setSubframeRendering(flag) {
+  setSubframeEnabled(flag);
+}
+
+function setPrefix(prefix) {
+  setIdPrefix(prefix);
+}
+
+function loadAnimation(params) {
+  if (standalone === true) {
+    params.animationData = JSON.parse(animationData);
+  }
+  return animationManager.loadAnimation(params);
+}
+
+function setQuality(value) {
+  if (typeof value === 'string') {
+    switch (value) {
+      case 'high':
+        setDefaultCurveSegments(200);
+        break;
+      default:
+      case 'medium':
+        setDefaultCurveSegments(50);
+        break;
+      case 'low':
+        setDefaultCurveSegments(10);
+        break;
+    }
+  } else if (!isNaN(value) && value > 1) {
+    setDefaultCurveSegments(value);
+  }
+  if (getDefaultCurveSegments() >= 50) {
+    roundValues(false);
+  } else {
+    roundValues(true);
+  }
+}
+
+function inBrowser() {
+  return false;
+}
+
+function installPlugin(type, plugin) {
+  if (type === 'expressions') {
+    setExpressionsPlugin(plugin);
+  }
+}
+
+function getFactory(name) {
+  switch (name) {
+    case 'propertyFactory':
+      return PropertyFactory;
+    case 'shapePropertyFactory':
+      return ShapePropertyFactory;
+    case 'matrix':
+      return Matrix;
+    default:
+      return null;
+  }
+}
+
+
+lottie.play = animationManager.play;
+lottie.pause = animationManager.pause;
+lottie.setLocationHref = setLocation;
+lottie.togglePause = animationManager.togglePause;
+lottie.setSpeed = animationManager.setSpeed;
+lottie.setDirection = animationManager.setDirection;
+lottie.stop = animationManager.stop;
+lottie.searchAnimations = searchAnimations;
+lottie.registerAnimation = animationManager.registerAnimation;
+lottie.loadAnimation = loadAnimation;
+lottie.setSubframeRendering = setSubframeRendering;
+lottie.resize = animationManager.resize;
+lottie.setContentMode = animationManager.setContentMode;
+lottie.clearFileCache = animationManager.clearFileCache;
+lottie.clearFileCacheSync = animationManager.clearFileCacheSync;
+// lottie.start = start;
+lottie.goToAndStop = animationManager.goToAndStop;
+lottie.goToAndPlay = animationManager.goToAndPlay;
+lottie.destroy = animationManager.destroy;
+lottie.setFrameRate = animationManager.setFrameRate;
+lottie.setQuality = setQuality;
+lottie.inBrowser = inBrowser;
+lottie.installPlugin = installPlugin;
+lottie.freeze = animationManager.freeze;
+lottie.unfreeze = animationManager.unfreeze;
+lottie.setVolume = animationManager.setVolume;
+lottie.mute = animationManager.mute;
+lottie.unmute = animationManager.unmute;
+lottie.getRegisteredAnimations = animationManager.getRegisteredAnimations;
+lottie.bindContext2dToCoordinator = animationManager.bindContext2dToCoordinator;
+lottie.unbindContext2dFromCoordinator = animationManager.unbindContext2dFromCoordinator;
+lottie.setAttachedCanvasHasVisibleArea = animationManager.setAttachedCanvasHasVisibleArea;
+lottie.useWebWorker = setWebWorker;
+lottie.setIDPrefix = setPrefix;
+lottie.__getFactory = getFactory;
+lottie.version = '[[BM_VERSION]]';
+
+
+function getQueryVariable(variable) {
+  var vars = queryString.split('&');
+  for (var i = 0; i < vars.length; i += 1) {
+    var pair = vars[i].split('=');
+    if (decodeURIComponent(pair[0]) == variable) { // eslint-disable-line eqeqeq
+      return decodeURIComponent(pair[1]);
+    }
+  }
+  return null;
+}
+var queryString = '';
+if (standalone) {
+  renderer = getQueryVariable('renderer');
+}
+
+export default lottie;
+ÔrF–¯../utils/common§../main¸../utils/PropertyFactory½../utils/shapes/ShapePropertyÙ"../3rd_party/transformation-matrix½../animation/AnimationManagerÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ‘D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\common.jsAÃªoh-resolveÂGAÂÙ‰D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\main.jsAÃªoh-resolveÂGAÂÙšD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\PropertyFactory.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\shapes\ShapeProperty.jsAÃªoh-resolveÂGAÂÙ¤D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\3rd_party\transformation-matrix.jsAÃªoh-resolveÂGAÂÙŸD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\animation\AnimationManager.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache–ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration 8’ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifier	ÔrL”¤type¥start£end¤nameªIdentifier	¯setLocationHrefLªIdentifier	¯setLocationHrefK¯ImportSpecifier&LªIdentifier&¬setWebWorkerLªIdentifier&¬setWebWorkerÔrM•¤type¥start£end¥value£raw§Literal.7§../main©'../main'J±ImportDeclaration:Ìw‘ÔrN”¤type¥start£end¥local¶ImportDefaultSpecifierÌAÌQLªIdentifierÌAÌQ°animationManagerM§LiteralÌWÌv½../animation/AnimationManager¿'../animation/AnimationManager'J±ImportDeclarationÌyÍ$–K¯ImportSpecifierÌ…ÌœLªIdentifierÌ…Ìœ·setDefaultCurveSegmentsLªIdentifierÌ…Ìœ·setDefaultCurveSegmentsK¯ImportSpecifierÌ¡Ì¸LªIdentifierÌ¡Ì¸·getDefaultCurveSegmentsLªIdentifierÌ¡Ì¸·getDefaultCurveSegmentsK¯ImportSpecifierÌ½ÌÈLªIdentifierÌ½ÌÈ«roundValuesLªIdentifierÌ½ÌÈ«roundValuesK¯ImportSpecifierÌÍÌØLªIdentifierÌÍÌØ«setIdPrefixLªIdentifierÌÍÌØ«setIdPrefixK¯ImportSpecifierÌÝÌïLªIdentifierÌÝÌï²setSubframeEnabledLªIdentifierÌÝÌï²setSubframeEnabledK¯ImportSpecifierÌôÍLªIdentifierÌôÍ´setExpressionsPluginLªIdentifierÌôÍ´setExpressionsPluginM§LiteralÍÍ#¯../utils/common±'../utils/common'J±ImportDeclarationÍ&Í]‘N¶ImportDefaultSpecifierÍ-Í<LªIdentifierÍ-Í<¯PropertyFactoryM§LiteralÍBÍ\¸../utils/PropertyFactoryº'../utils/PropertyFactory'J±ImportDeclarationÍ_Í ‘N¶ImportDefaultSpecifierÍfÍzLªIdentifierÍfÍz´ShapePropertyFactoryM§LiteralÍ€ÍŸ½../utils/shapes/ShapeProperty¿'../utils/shapes/ShapeProperty'J±ImportDeclarationÍ¢ÍÚ‘N¶ImportDefaultSpecifierÍ©Í¯LªIdentifierÍ©Í¯¦MatrixM§LiteralÍµÍÙÙ"../3rd_party/transformation-matrixÙ$'../3rd_party/transformation-matrix'

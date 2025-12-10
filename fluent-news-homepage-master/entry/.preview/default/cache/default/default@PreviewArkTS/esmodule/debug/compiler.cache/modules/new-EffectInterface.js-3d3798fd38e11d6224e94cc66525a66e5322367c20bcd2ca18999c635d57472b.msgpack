@@ -1,0 +1,335 @@
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚfimport ExpressionPropertyInterface from './ExpressionValueFactory';
+import propertyGroupFactory from './PropertyGroupFactory';
+import PropertyInterface from './PropertyInterface';
+
+const EffectsExpressionInterface = (function () {
+  var ob = {
+    createEffectsInterface: createEffectsInterface,
+  };
+
+  function createEffectsInterface(elem, propertyGroup) {
+    if (elem.effectsManager) {
+      var effectElements = [];
+      var effectsData = elem.data.ef;
+      var i;
+      var len = elem.effectsManager.effectElements.length;
+      for (i = 0; i < len; i += 1) {
+        effectElements.push(createGroupInterface(effectsData[i], elem.effectsManager.effectElements[i], propertyGroup, elem));
+      }
+
+      var effects = elem.data.ef || [];
+      var groupInterface = function (name) {
+        i = 0;
+        len = effects.length;
+        while (i < len) {
+          if (name === effects[i].nm || name === effects[i].mn || name === effects[i].ix) {
+            return effectElements[i];
+          }
+          i += 1;
+        }
+        return null;
+      };
+      Object.defineProperty(groupInterface, 'numProperties', {
+        get: function () {
+          return effects.length;
+        },
+      });
+      return groupInterface;
+    }
+    return null;
+  }
+
+  function createGroupInterface(data, elements, propertyGroup, elem) {
+    function groupInterface(name) {
+      var effects = data.ef;
+      var i = 0;
+      var len = effects.length;
+      while (i < len) {
+        if (name === effects[i].nm || name === effects[i].mn || name === effects[i].ix) {
+          if (effects[i].ty === 5) {
+            return effectElements[i];
+          }
+          return effectElements[i]();
+        }
+        i += 1;
+      }
+      throw new Error();
+    }
+    var _propertyGroup = propertyGroupFactory(groupInterface, propertyGroup);
+
+    var effectElements = [];
+    var i;
+    var len = data.ef.length;
+    for (i = 0; i < len; i += 1) {
+      if (data.ef[i].ty === 5) {
+        effectElements.push(createGroupInterface(data.ef[i], elements.effectElements[i], elements.effectElements[i].propertyGroup, elem));
+      } else {
+        effectElements.push(createValueInterface(elements.effectElements[i], data.ef[i].ty, elem, _propertyGroup));
+      }
+    }
+
+    if (data.mn === 'ADBE Color Control') {
+      Object.defineProperty(groupInterface, 'color', {
+        get: function () {
+          return effectElements[0]();
+        },
+      });
+    }
+    Object.defineProperties(groupInterface, {
+      numProperties: {
+        get: function () {
+          return data.np;
+        },
+      },
+      _name: { value: data.nm },
+      propertyGroup: { value: _propertyGroup },
+    });
+    groupInterface.enabled = data.en !== 0;
+    groupInterface.active = groupInterface.enabled;
+    return groupInterface;
+  }
+
+  function createValueInterface(element, type, elem, propertyGroup) {
+    var expressionProperty = ExpressionPropertyInterface(element.p);
+    function interfaceFunction() {
+      if (type === 10) {
+        return elem.comp.compInterface(element.p.v);
+      }
+      return expressionProperty();
+    }
+
+    if (element.p.setGroupProperty) {
+      element.p.setGroupProperty(PropertyInterface('', propertyGroup));
+    }
+
+    return interfaceFunction;
+  }
+
+  return ob;
+}());
+
+export default EffectsExpressionInterface;
+Â“Ù­D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionValueFactory.jsÙ«D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\PropertyGroupFactory.jsÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\PropertyInterface.jsÙ¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\EffectInterface.jsÔrB˜±isLocalDependency¯isNodeEntryFile§pkgPath§pkgNameªpkgVersion±belongProjectPath±dependencyPkgInfo¨commonjsÂÂÙuD:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie¬@ohos/lottie¦2.0.25Ù8D:\GIT\github\ArkTS-news-app\fluent-news-homepage-masterÔrC’§pkgNameªpkgVersion¬@ohos/lottie¦2.0.25ÔrD’°hasDefaultExportªisCommonJSÃÂÃÚfimport ExpressionPropertyInterface from './ExpressionValueFactory';
+import propertyGroupFactory from './PropertyGroupFactory';
+import PropertyInterface from './PropertyInterface';
+
+const EffectsExpressionInterface = (function () {
+  var ob = {
+    createEffectsInterface: createEffectsInterface,
+  };
+
+  function createEffectsInterface(elem, propertyGroup) {
+    if (elem.effectsManager) {
+      var effectElements = [];
+      var effectsData = elem.data.ef;
+      var i;
+      var len = elem.effectsManager.effectElements.length;
+      for (i = 0; i < len; i += 1) {
+        effectElements.push(createGroupInterface(effectsData[i], elem.effectsManager.effectElements[i], propertyGroup, elem));
+      }
+
+      var effects = elem.data.ef || [];
+      var groupInterface = function (name) {
+        i = 0;
+        len = effects.length;
+        while (i < len) {
+          if (name === effects[i].nm || name === effects[i].mn || name === effects[i].ix) {
+            return effectElements[i];
+          }
+          i += 1;
+        }
+        return null;
+      };
+      Object.defineProperty(groupInterface, 'numProperties', {
+        get: function () {
+          return effects.length;
+        },
+      });
+      return groupInterface;
+    }
+    return null;
+  }
+
+  function createGroupInterface(data, elements, propertyGroup, elem) {
+    function groupInterface(name) {
+      var effects = data.ef;
+      var i = 0;
+      var len = effects.length;
+      while (i < len) {
+        if (name === effects[i].nm || name === effects[i].mn || name === effects[i].ix) {
+          if (effects[i].ty === 5) {
+            return effectElements[i];
+          }
+          return effectElements[i]();
+        }
+        i += 1;
+      }
+      throw new Error();
+    }
+    var _propertyGroup = propertyGroupFactory(groupInterface, propertyGroup);
+
+    var effectElements = [];
+    var i;
+    var len = data.ef.length;
+    for (i = 0; i < len; i += 1) {
+      if (data.ef[i].ty === 5) {
+        effectElements.push(createGroupInterface(data.ef[i], elements.effectElements[i], elements.effectElements[i].propertyGroup, elem));
+      } else {
+        effectElements.push(createValueInterface(elements.effectElements[i], data.ef[i].ty, elem, _propertyGroup));
+      }
+    }
+
+    if (data.mn === 'ADBE Color Control') {
+      Object.defineProperty(groupInterface, 'color', {
+        get: function () {
+          return effectElements[0]();
+        },
+      });
+    }
+    Object.defineProperties(groupInterface, {
+      numProperties: {
+        get: function () {
+          return data.np;
+        },
+      },
+      _name: { value: data.nm },
+      propertyGroup: { value: _propertyGroup },
+    });
+    groupInterface.enabled = data.en !== 0;
+    groupInterface.active = groupInterface.enabled;
+    return groupInterface;
+  }
+
+  function createValueInterface(element, type, elem, propertyGroup) {
+    var expressionProperty = ExpressionPropertyInterface(element.p);
+    function interfaceFunction() {
+      if (type === 10) {
+        return elem.comp.compInterface(element.p.v);
+      }
+      return expressionProperty();
+    }
+
+    if (element.p.setGroupProperty) {
+      element.p.setGroupProperty(PropertyInterface('', propertyGroup));
+    }
+
+    return interfaceFunction;
+  }
+
+  return ob;
+}());
+
+export default EffectsExpressionInterface;
+ÔrE•§version¨mappings¥names§sources®sourcesContentÜ p‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘Ù¦D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\EffectInterface.js‘Úfimport ExpressionPropertyInterface from './ExpressionValueFactory';
+import propertyGroupFactory from './PropertyGroupFactory';
+import PropertyInterface from './PropertyInterface';
+
+const EffectsExpressionInterface = (function () {
+  var ob = {
+    createEffectsInterface: createEffectsInterface,
+  };
+
+  function createEffectsInterface(elem, propertyGroup) {
+    if (elem.effectsManager) {
+      var effectElements = [];
+      var effectsData = elem.data.ef;
+      var i;
+      var len = elem.effectsManager.effectElements.length;
+      for (i = 0; i < len; i += 1) {
+        effectElements.push(createGroupInterface(effectsData[i], elem.effectsManager.effectElements[i], propertyGroup, elem));
+      }
+
+      var effects = elem.data.ef || [];
+      var groupInterface = function (name) {
+        i = 0;
+        len = effects.length;
+        while (i < len) {
+          if (name === effects[i].nm || name === effects[i].mn || name === effects[i].ix) {
+            return effectElements[i];
+          }
+          i += 1;
+        }
+        return null;
+      };
+      Object.defineProperty(groupInterface, 'numProperties', {
+        get: function () {
+          return effects.length;
+        },
+      });
+      return groupInterface;
+    }
+    return null;
+  }
+
+  function createGroupInterface(data, elements, propertyGroup, elem) {
+    function groupInterface(name) {
+      var effects = data.ef;
+      var i = 0;
+      var len = effects.length;
+      while (i < len) {
+        if (name === effects[i].nm || name === effects[i].mn || name === effects[i].ix) {
+          if (effects[i].ty === 5) {
+            return effectElements[i];
+          }
+          return effectElements[i]();
+        }
+        i += 1;
+      }
+      throw new Error();
+    }
+    var _propertyGroup = propertyGroupFactory(groupInterface, propertyGroup);
+
+    var effectElements = [];
+    var i;
+    var len = data.ef.length;
+    for (i = 0; i < len; i += 1) {
+      if (data.ef[i].ty === 5) {
+        effectElements.push(createGroupInterface(data.ef[i], elements.effectElements[i], elements.effectElements[i].propertyGroup, elem));
+      } else {
+        effectElements.push(createValueInterface(elements.effectElements[i], data.ef[i].ty, elem, _propertyGroup));
+      }
+    }
+
+    if (data.mn === 'ADBE Color Control') {
+      Object.defineProperty(groupInterface, 'color', {
+        get: function () {
+          return effectElements[0]();
+        },
+      });
+    }
+    Object.defineProperties(groupInterface, {
+      numProperties: {
+        get: function () {
+          return data.np;
+        },
+      },
+      _name: { value: data.nm },
+      propertyGroup: { value: _propertyGroup },
+    });
+    groupInterface.enabled = data.en !== 0;
+    groupInterface.active = groupInterface.enabled;
+    return groupInterface;
+  }
+
+  function createValueInterface(element, type, elem, propertyGroup) {
+    var expressionProperty = ExpressionPropertyInterface(element.p);
+    function interfaceFunction() {
+      if (type === 10) {
+        return elem.comp.compInterface(element.p.v);
+      }
+      return expressionProperty();
+    }
+
+    if (element.p.setGroupProperty) {
+      element.p.setGroupProperty(PropertyInterface('', propertyGroup));
+    }
+
+    return interfaceFunction;
+  }
+
+  return ob;
+}());
+
+export default EffectsExpressionInterface;
+ÔrF“³./PropertyInterface¸./ExpressionValueFactory¶./PropertyGroupFactoryÔrG—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ¨D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\PropertyInterface.jsAÃªoh-resolveÂGAÂÙ­D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\ExpressionValueFactory.jsAÃªoh-resolveÂGAÂÙ«D:\GIT\github\ArkTS-news-app\fluent-news-homepage-master\oh_modules\.ohpm\@ohos+lottie@2.0.25\oh_modules\@ohos\lottie\src\main\js\utils\expressions\PropertyGroupFactory.jsAÃªoh-resolveÂ‘ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache“ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclaration ÌC‘ÔrK”¤type¥start£end¥local¶ImportDefaultSpecifier"ÔrL”¤type¥start£end¤nameªIdentifier"»ExpressionPropertyInterfaceÔrM•¤type¥start£end¥value£raw§Literal(ÌB¸./ExpressionValueFactoryº'./ExpressionValueFactory'J±ImportDeclarationÌEÌ‘K¶ImportDefaultSpecifierÌLÌ`LªIdentifierÌLÌ`´propertyGroupFactoryM§LiteralÌfÌ~¶./PropertyGroupFactory¸'./PropertyGroupFactory'J±ImportDeclarationÌÌµ‘K¶ImportDefaultSpecifierÌˆÌ™LªIdentifierÌˆÌ™±PropertyInterfaceM§LiteralÌŸÌ´³./PropertyInterfaceµ'./PropertyInterface'
