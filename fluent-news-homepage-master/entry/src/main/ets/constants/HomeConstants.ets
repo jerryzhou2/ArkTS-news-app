@@ -15,6 +15,7 @@
 
 import NewsTypeModel from '../viewmodel/NewsTypeModel';
 
+// 在 HomeConstants.ets 中添加以下内容
 export class HomeConstants {
   /**
    * TabBars un select text font weight.
@@ -49,4 +50,42 @@ export class HomeConstants {
     { id: 6, name: $r('app.string.tab_bar_type7') },
     { id: 7, name: $r('app.string.tab_bar_type8') }
   ];
+
+  // 新增：拖拽相关常量
+  /**
+   * Drag and drop opacity when dragging.
+   */
+  public static readonly DRAG_OPACITY_DRAGGING: number = 0.7;
+  /**
+   * Drag and drop opacity when normal.
+   */
+  public static readonly DRAG_OPACITY_NORMAL: number = 1.0;
+  /**
+   * Drag and drop scale when dragging.
+   */
+  public static readonly DRAG_SCALE_DRAGGING: number = 1.1;
+  /**
+   * Drag and drop scale when normal.
+   */
+  public static readonly DRAG_SCALE_NORMAL: number = 1.0;
+  /**
+   * Drag and drop background color when dragging.
+   */
+  public static readonly DRAG_BG_COLOR_DRAGGING: ResourceColor = $r('app.color.drag_bg_color_dragging');
+  /**
+   * Drag and drop background color when normal.
+   */
+  public static readonly DRAG_BG_COLOR_NORMAL: ResourceColor = $r('app.color.transparent');
+  /**
+   * Drag and drop border radius.
+   */
+  public static readonly DRAG_BORDER_RADIUS: number = 8;
+  /**
+   * Drag and drop border width.
+   */
+  public static readonly DRAG_BORDER_WIDTH: number = 2;
+  /**
+   * Drag and drop border color.
+   */
+  public static readonly DRAG_BORDER_COLOR: ResourceColor = $r('app.color.primary_color');
 }
