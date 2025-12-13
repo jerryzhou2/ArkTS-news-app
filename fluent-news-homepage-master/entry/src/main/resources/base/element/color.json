@@ -119,6 +119,18 @@
     {
       "name": "white",
       "value": "#FFFFFF"
+    },
+    {
+      "name": "drag_bg_color_dragging",
+      "value": "#33000000"
+    },
+    {
+      "name": "primary_color",
+      "value": "#007DFF"
+    },
+    {
+      "name": "transparent",
+      "value": "#00000000"
     }
   ]
 }
