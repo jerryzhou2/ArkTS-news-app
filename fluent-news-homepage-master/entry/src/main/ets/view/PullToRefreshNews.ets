@@ -16,39 +16,31 @@
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-// [Start pull_to_refresh]
-// PullToRefreshNews.ets
 import { PullToRefresh } from '@ohos/pulltorefresh/index';
-// [End pull_to_refresh]
 import { BreakpointConstants } from '../constants/BreakpointConstants';
 import { CommonConstants } from '../constants/CommonConstants';
 import { BreakpointType } from '../utils/BreakpointType';
 import NewsData from '../viewmodel/NewsData';
 import { NewsDataSource } from '../viewmodel/NewsDataSource';
+// 【新增引用】
+import NewsTypeModel from '../viewmodel/NewsTypeModel';
+import newsViewModel from '../viewmodel/NewsViewModel';
 
 const uiContext: UIContext | undefined = AppStorage.get('uiContext');
 const NEWS_TITLE_MAX_LINES: number = 1;
 const NEWS_TITLE_TEXT_FONT_WEIGHT: number = 500;
 const NEWS_CONTENT_MAX_LINES: number = 2;
 const NEWS_TIME_MAX_LINES: number = 1;
-const NEWS_RESOLVE_SUCCESS: string =
-  uiContext!.getHostContext()!.resourceManager.getStringSync($r('app.string.refresh').id);
+// 这里的感叹号 ! 是断言 uiContext 必定存在，防止 TS 报错
+const NEWS_RESOLVE_SUCCESS: string = uiContext!.getHostContext()!.resourceManager.getStringSync($r('app.string.refresh').id);
 const NEWS_MOCK_DATA_COUNT: number = 8;
-// [Start mock_data_file_one_dir]
-// PullToRefreshNews.ets
-const MOCK_DATA_FILE_ONE_DIR: string =
-  uiContext!.getHostContext()!.resourceManager.getStringSync($r('app.string.mock1').id);
-const MOCK_DATA_FILE_TWO_DIR: string =
-  uiContext!.getHostContext()!.resourceManager.getStringSync($r('app.string.mock2').id);
-// [End mock_data_file_one_dir]
+const MOCK_DATA_FILE_ONE_DIR: string = uiContext!.getHostContext()!.resourceManager.getStringSync($r('app.string.mock1').id);
+const MOCK_DATA_FILE_TWO_DIR: string = uiContext!.getHostContext()!.resourceManager.getStringSync($r('app.string.mock2').id);
 const NEWS_REFRESH_TIME: number = 1000;
 
 @Component
 export struct PullToRefreshNews {
-  // [Start news_data]
-  // PullToRefreshNews.ets
   @State newsData: NewsDataSource = new NewsDataSource();
-  // [End news_data]
   @State firstIndex: number = 0;
   @StorageLink('currentBreakpoint') currentBreakpoint: string = BreakpointConstants.BREAKPOINT_LG;
   private mockFlag: boolean = true;
@@ -56,18 +48,32 @@ export struct PullToRefreshNews {
   readonly ANIMATION_DURATION: number = 500;
   readonly SWITCH_BUTTON: number = 3;
 
+  // 【新增】接收父组件传来的分类信息
+  @Prop newsType: NewsTypeModel;
+
+  // 【修改】aboutToAppear
   aboutToAppear() {
-    let newsModelMockData: NewsData[] = getNews(MOCK_DATA_FILE_ONE_DIR);
-    for (let j = CommonConstants.ZERO; j < NEWS_MOCK_DATA_COUNT; j++) {
-      this.newsData.pushData(newsModelMockData[j]);
+    this.loadData();
+  }
+
+  // 【新增】封装加载逻辑
+  loadData() {
+    // 1. 获取本地原始数据
+    let rawNews: NewsData[] = getNews(MOCK_DATA_FILE_ONE_DIR);
+
+    // 2. 调用 ViewModel 的 AI 过滤方法
+    let filteredNews = newsViewModel.filterNewsByTrainedModel(rawNews, this.newsType.id);
+
+    // 3. 将过滤后的数据放入列表
+    this.newsData.clear();
+    for (let item of filteredNews) {
+      this.newsData.pushData(item);
     }
   }
 
   build() {
     Column() {
       Column() {
-        // [Start pull_to_refresh1]
-        // PullToRefreshNews.ets
         PullToRefresh({
           data: $newsData,
           scroller: this.scroller,
@@ -76,41 +82,45 @@ export struct PullToRefreshNews {
           },
           onRefresh: () => {
             return new Promise<string>((resolve, reject) => {
-              // [StartExclude pull_to_refresh1]
               setTimeout(() => {
-                this.newsData.clear();
-                let newsModelMockData: NewsData[] = [];
+                // 【修改】刷新逻辑
+                let rawNews: NewsData[] = [];
                 if (this.mockFlag) {
-                  newsModelMockData = getNews(MOCK_DATA_FILE_TWO_DIR);
+                  rawNews = getNews(MOCK_DATA_FILE_TWO_DIR);
                 } else {
-                  newsModelMockData = getNews(MOCK_DATA_FILE_ONE_DIR);
+                  rawNews = getNews(MOCK_DATA_FILE_ONE_DIR);
                 }
                 this.mockFlag = !this.mockFlag;
-                for (let j = CommonConstants.ZERO; j < NEWS_MOCK_DATA_COUNT; j++) {
-                  this.newsData.pushData(newsModelMockData[j]);
+
+                // 核心：使用 AI 模型过滤
+                let filteredNews = newsViewModel.filterNewsByTrainedModel(rawNews, this.newsType.id);
+
+                this.newsData.clear();
+                for (let item of filteredNews) {
+                  this.newsData.pushData(item);
                 }
                 resolve(NEWS_RESOLVE_SUCCESS);
-                // [EndExclude pull_to_refresh1]
               }, NEWS_REFRESH_TIME);
             });
           },
           onLoadMore: () => {
             return new Promise<string>((resolve, reject) => {
-              // [StartExclude pull_to_refresh1]
               setTimeout(() => {
-                let newsModelMockData: NewsData[] = getNews(MOCK_DATA_FILE_ONE_DIR);
-                for (let j = CommonConstants.ZERO; j < NEWS_MOCK_DATA_COUNT; j++) {
-                  this.newsData.pushData(newsModelMockData[j]);
+                let rawNews = getNews(MOCK_DATA_FILE_ONE_DIR);
+
+                // 核心：加载更多也需要过滤
+                let filteredNews = newsViewModel.filterNewsByTrainedModel(rawNews, this.newsType.id);
+
+                for (let item of filteredNews) {
+                  this.newsData.pushData(item);
                 }
                 resolve(NEWS_RESOLVE_SUCCESS);
               }, NEWS_REFRESH_TIME);
-              // [EndExclude pull_to_refresh1]
             });
           },
           customLoad: null,
           customRefresh: null,
         })
-        // [End pull_to_refresh1]
       }
       .backgroundColor($r('app.color.listColor'))
     }
@@ -120,21 +130,16 @@ export struct PullToRefreshNews {
   @Builder
   private getListView() {
     Stack({ alignContent: Alignment.BottomEnd }) {
-      // [Start news_title]
-      // PullToRefreshNews.ets
       List({ space: CommonConstants.LIST_SPACE, scroller: this.scroller }) {
         LazyForEach(this.newsData, (item: NewsData) => {
           ListItem() {
             newsItem({
-              // [StartExclude news_title]
               newsTitle: item.newsTitle,
               newsContent: item.newsContent,
               newsTime: item.newsTime,
               newsImage: item.newsImage
-              // [EndExclude news_title]
             })
           }
-          // [StartExclude news_title]
           .backgroundColor($r('app.color.listViewColor'))
           .margin({
             bottom: $r('app.string.news_list_margin_bottom'),
@@ -144,11 +149,8 @@ export struct PullToRefreshNews {
               $r('app.float.page_col_padding_lg')).getValue(this.currentBreakpoint),
           })
           .borderRadius($r('app.integer.news_list_border_radius'))
-
-          // [EndExclude news_title]
         }, (item: NewsData, index?: number) => JSON.stringify(item) + index);
       }
-      // [End news_title]
       .onScrollIndex((first: number) => {
         this.firstIndex = first;
       })
@@ -190,11 +192,12 @@ export struct PullToRefreshNews {
   }
 }
 
-// [Start news_item]
-// PullToRefreshNews.ets
+// --------------------------------------------------------------------------------
+// 以下是刚才丢失的代码，请务必保留
+// --------------------------------------------------------------------------------
+
 @Component
 struct newsItem {
-  // [StartExclude news_item]
   @StorageLink('currentBreakpoint') currentBreakpoint: string = BreakpointConstants.BREAKPOINT_LG;
   newsTitle: string | Resource = '';
   newsContent: string | Resource = '';
@@ -268,11 +271,7 @@ struct newsItem {
     })
     .height($r('app.string.news_item_height'))
   }
-
-  // [EndExclude news_item]
 }
-
-// [End news_item]
 
 class JsonNewsList {
   public newsList: NewsData[] = [];

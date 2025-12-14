@@ -37,11 +37,11 @@ export default struct TabBar {
         .padding({ left: Const.TAB_BARS_HORIZONTAL_PADDING, right: Const.TAB_BARS_HORIZONTAL_PADDING })
         .fontSize(this.currentIndex === index ?
           (this.currentBreakpoint === BreakpointConstants.BREAKPOINT_SM ?
-          $r('app.float.tab_bar_font_size_20') : $r('app.float.tab_bar_font_size_22')) :
+            $r('app.float.tab_bar_font_size_20') : $r('app.float.tab_bar_font_size_22')) :
           (this.currentBreakpoint === BreakpointConstants.BREAKPOINT_SM ?
-          $r('app.float.tab_bar_font_size_16') : $r('app.float.tab_bar_font_size_18')))
+            $r('app.float.tab_bar_font_size_16') : $r('app.float.tab_bar_font_size_18')))
         .fontWeight(this.currentIndex === index ?
-        Const.TAB_BARS_SELECT_TEXT_FONT_WEIGHT : Const.TAB_BARS_UN_SELECT_TEXT_FONT_WEIGHT)
+          Const.TAB_BARS_SELECT_TEXT_FONT_WEIGHT : Const.TAB_BARS_UN_SELECT_TEXT_FONT_WEIGHT)
         .fontColor($r('app.color.fontColor_text3'))
       // [EndExclude tab_bar]
     }
@@ -52,9 +52,9 @@ export default struct TabBar {
     Tabs({ barPosition: BarPosition.Start }) {
       ForEach(this.tabBarArray, (tabsItem: NewsTypeModel, index: number) => {
         TabContent() {
-          // [StartExclude tab_bar]
-          PullToRefreshNews()
-          // [EndExclude tab_bar]
+          // 【核心修改】将当前的 tabsItem (包含分类ID和名称) 传递给子组件
+          // 这样 PullToRefreshNews 就知道自己该显示哪类新闻了
+          PullToRefreshNews({ newsType: tabsItem })
         }
         // [StartExclude tab_bar]
         .tabBar(this.TabBuilder(tabsItem.id, index))
